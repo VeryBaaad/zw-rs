@@ -2,8 +2,9 @@ use std::env;
 use teloxide::{prelude::*, types::{InlineKeyboardMarkup, MessageId, ReplyParameters}, utils::command::BotCommands};
 use sqlx::{SqlitePool, Row};
 use chrono::{Utc, Duration};
+use log::Level;
 
-#[derive(BotCommands, Clone)]
+#[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
 enum Command {
     Zw,
@@ -13,14 +14,17 @@ enum Command {
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
-    log::info!("Starting bot...");
+    log(Level::Info, "ZWBotDaemon", "Starting bot...");
 
     let bot = Bot::from_env();
 
     let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:zw.db".to_string());
+    log(Level::Info, "ZWBotDaemon", &format!("Connecting to database: {}", database_url));
     let pool = SqlitePool::connect(&database_url).await.expect("Failed to connect to database");
+    log(Level::Info, "ZWBotDaemon", "Database connected successfully");
 
     // Create table if not exists
+    log(Level::Debug, "ZWBotDaemon", "Creating table if not exists");
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
@@ -33,6 +37,7 @@ async fn main() {
     .execute(&pool)
     .await
     .expect("Failed to create table");
+    log(Level::Info, "ZWBotDaemon", "Table initialization complete");
 
     let handler = dptree::entry()
         .branch(Update::filter_message().filter_command::<Command>().endpoint(commands_handler))
@@ -52,6 +57,7 @@ async fn commands_handler(
     cmd: Command,
     pool: SqlitePool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log(Level::Info, "commands_handler", &format!("Received command: {:?}", cmd));
     match cmd {
         Command::Zw => handle_zw(bot, msg, pool).await?,
         Command::Rank => handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, 0).await?,
@@ -64,6 +70,7 @@ async fn handle_zw(
     msg: Message,
     pool: SqlitePool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log(Level::Debug, "handle_zw", "Handling zw command");
     let user = msg.from.as_ref().unwrap();
     let user_id = user.id.0 as i64;
     let username = user.username.as_deref().unwrap_or("未知用户");
@@ -71,45 +78,61 @@ async fn handle_zw(
         Some(last_name) => format!("{} {}", user.first_name, last_name),
         None => user.first_name.clone(),
     };
+    log(Level::Info, "handle_zw", &format!("User: {} (ID: {}, Username: {})", name, user_id, username));
 
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
     // Check if user exists
+    log(Level::Debug, "handle_zw", &format!("Querying user {} from database", user_id));
     let row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
         .bind(user_id)
         .fetch_optional(&pool)
         .await?;
+    log(Level::Debug, "handle_zw", &format!("Query result: user_exists = {}", row.is_some()));
 
     let (current_count, last_time) = if let Some(row) = row {
         let count: i64 = row.try_get("count")?;
         let last_time: chrono::DateTime<Utc> = row.try_get("last_time")?;
+        log(Level::Debug, "handle_zw", &format!("User exists: count={}, last_time={}", count, last_time));
         (count, Some(last_time))
     } else {
+        log(Level::Debug, "handle_zw", "New user, count=0, last_time=None");
         (0, None)
     };
 
     if let Some(last_time) = last_time {
         let next_time = last_time + cd_duration;
+        log(Level::Debug, "handle_zw", &format!("Checking cooldown: now={}, next_time={}", now, next_time));
         if now < next_time {
+            log(Level::Warn, "handle_zw", &format!("User {} still in cooldown", user_id));
             let remaining = next_time - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
+            log(Level::Debug, "handle_zw", &format!("Remaining cooldown: {}m{}s", mins, secs));
             let rank = get_rank(&pool, user_id).await?;
             let text = format!(
                 "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n您在自慰排行榜上的位置：{}\n总次数：{}次\n下次可进行自慰的时间：{}分{}秒",
                 name, rank, current_count, mins, secs
             );
-            bot.send_message(msg.chat.id, text)
+            if let Err(e) = bot.send_message(msg.chat.id, text)
                 .reply_parameters(ReplyParameters::new(msg.id))
-                .await?;
+                .await {
+                log(Level::Error, "handle_zw", &format!("Failed to send cooldown message: {}", e));
+                return Err(Box::new(e));
+            }
             return Ok(());
         }
+        log(Level::Debug, "handle_zw", "Cooldown period expired, proceeding");
+    } else {
+        log(Level::Debug, "handle_zw", "No previous record, first time user");
     }
 
     // Update count and last_time
     let new_count = current_count + 1;
-    sqlx::query(
+    log(Level::Info, "handle_zw", &format!("Updating user count: {} -> {}", current_count, new_count));
+    log(Level::Debug, "handle_zw", "Inserting/updating user in database");
+    if let Err(e) = sqlx::query(
         "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET
          username = excluded.username,
@@ -121,16 +144,24 @@ async fn handle_zw(
     .bind(new_count)
     .bind(now)
     .execute(&pool)
-    .await?;
+    .await {
+        log(Level::Error, "handle_zw", &format!("Failed to update user in database: {}", e));
+        return Err(Box::new(e));
+    }
+    log(Level::Debug, "handle_zw", "Database update successful");
 
     let rank = get_rank(&pool, user_id).await?;
     let text = format!(
         "已开始自慰！\n\n您在自慰排行榜上的位置：{}\n总次数：{}次\n下次可进行自慰的时间：30分0秒",
         rank, new_count
     );
-    bot.send_message(msg.chat.id, text)
+    if let Err(e) = bot.send_message(msg.chat.id, text)
         .reply_parameters(ReplyParameters::new(msg.id))
-        .await?;
+        .await {
+        log(Level::Error, "handle_zw", &format!("Failed to send success message: {}", e));
+        return Err(Box::new(e));
+    }
+    log(Level::Info, "handle_zw", &format!("User {} completed action, new count: {}", user_id, new_count));
     Ok(())
 }
 
@@ -142,9 +173,12 @@ async fn handle_rank(
     pool: SqlitePool,
     page: usize,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log(Level::Info, "handle_rank", &format!("Handling rank command: page={}", page));
     let per_page: i64 = 10;
     let offset: i64 = (page as i64) * per_page;
+    log(Level::Debug, "handle_rank", &format!("Fetching rankings: per_page={}, offset={}", per_page, offset));
 
+    log(Level::Debug, "handle_rank", "Querying users from database");
     let rows = sqlx::query(
         "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
     )
@@ -152,11 +186,14 @@ async fn handle_rank(
     .bind(offset)
     .fetch_all(&pool)
     .await?;
+    log(Level::Debug, "handle_rank", &format!("Retrieved {} users from database", rows.len()));
 
+    log(Level::Debug, "handle_rank", "Querying total user count");
     let total = sqlx::query("SELECT COUNT(*) as count FROM users")
         .fetch_one(&pool)
         .await?
         .try_get::<i64, _>("count")? as usize;
+    log(Level::Debug, "handle_rank", &format!("Total users in database: {}", total));
 
     let mut text = "自慰排行榜\n\n".to_string();
     for (i, row) in rows.iter().enumerate() {
@@ -180,16 +217,25 @@ async fn handle_rank(
     }
 
     if let Some(message_id) = message_id {
-        bot.edit_message_text(chat_id, message_id, text)
+        log(Level::Debug, "handle_rank", "Editing existing rank message");
+        if let Err(e) = bot.edit_message_text(chat_id, message_id, text)
             .reply_markup(keyboard)
-            .await?;
+            .await {
+            log(Level::Error, "handle_rank", &format!("Failed to edit rank message: {}", e));
+            return Err(Box::new(e));
+        }
     } else {
+        log(Level::Debug, "handle_rank", "Sending new rank message");
         let mut req = bot.send_message(chat_id, text).reply_markup(keyboard);
         if let Some(reply_id) = reply_to {
             req = req.reply_parameters(ReplyParameters::new(reply_id));
         }
-        req.await?;
+        if let Err(e) = req.await {
+            log(Level::Error, "handle_rank", &format!("Failed to send rank message: {}", e));
+            return Err(Box::new(e));
+        }
     }
+    log(Level::Debug, "handle_rank", "Rank message sent successfully");
     Ok(())
 }
 
@@ -200,26 +246,60 @@ async fn callback_handler(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(data) = &q.data
         && data.starts_with("rank_") {
+        log(Level::Debug, "callback_handler", "Processing rank pagination callback");
             let page: usize = data[5..].parse().unwrap_or(0);
+            log(Level::Debug, "callback_handler", &format!("Parsed page number: {}", page));
             if let Some(msg) = &q.message {
                 let chat_id = msg.chat().id;
                 let message_id = msg.id();
-                handle_rank(bot.clone(), chat_id, Some(message_id), None, pool, page).await?;
-                bot.answer_callback_query(q.id).await?;
+                log(Level::Debug, "callback_handler", &format!("Calling handle_rank: chat_id={}, message_id={}", chat_id, message_id));
+                if let Err(e) = handle_rank(bot.clone(), chat_id, Some(message_id), None, pool, page).await {
+                    log(Level::Error, "callback_handler", &format!("handle_rank failed: {}", e));
+                    return Err(e);
+                }
+                if let Err(e) = bot.answer_callback_query(q.id).await {
+                    log(Level::Error, "callback_handler", &format!("Failed to answer callback: {}", e));
+                    return Err(Box::new(e));
+                }
             }
         }
     Ok(())
 }
 
 async fn get_rank(pool: &SqlitePool, user_id: i64) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-    let row = sqlx::query(
+    log(Level::Debug, "get_rank", &format!("Calculating rank for user: {}", user_id));
+    let row = match sqlx::query(
         "SELECT COUNT(*) as rank FROM users WHERE count > (SELECT count FROM users WHERE user_id = ?) OR (count = (SELECT count FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
     )
     .bind(user_id)
     .bind(user_id)
     .bind(user_id)
     .fetch_one(pool)
-    .await?;
+    .await {
+        Ok(r) => r,
+        Err(e) => {
+            log(Level::Error, "get_rank", &format!("Failed to fetch rank for user {}: {}", user_id, e));
+            return Err(Box::new(e));
+        }
+    };
     let rank: i64 = row.try_get("rank")?;
-    Ok((rank + 1) as usize)
+    let final_rank = (rank + 1) as usize;
+    log(Level::Debug, "get_rank", &format!("User {} rank: {}", user_id, final_rank));
+    Ok(final_rank)
+}
+
+fn log(priority: Level, tag: &str, msg: &str) {
+    if priority == Level::Debug && !cfg!(debug_assertions) {
+        return;
+    }
+    let shortlevel: &str = match priority {
+        Level::Error => "E",
+        Level::Warn => "W",
+        Level::Info => "I",
+        Level::Debug => "D",
+        _ => "N",
+    };
+    let output: String = format!("[ {} {}/{} ] {}", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"), shortlevel, tag, msg);
+    log::log!(priority, "{}", output);
+    println!("{}", output);
 }
