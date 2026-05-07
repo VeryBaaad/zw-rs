@@ -202,7 +202,7 @@ async fn handle_rank(
     };
 
     let valid_page = if page <= max_page_index { page } else { 0 };
-    let offset: i64 = (page as i64) * per_page;
+    let offset: i64 = (valid_page as i64) * per_page;
     log(Level::Debug, "handle_rank", &format!("Fetching rankings: per_page={}, offset={}", per_page, offset));
 
     log(Level::Debug, "handle_rank", "Querying users from database");
@@ -229,7 +229,7 @@ async fn handle_rank(
     if valid_page > 0 {
         row.push(teloxide::types::InlineKeyboardButton::callback("上一页", format!("rank_{}", valid_page - 1)));
     }
-    if (offset + per_page) < (total as i64) {
+    if (valid_page + 1) * (per_page as usize) < total {
         row.push(teloxide::types::InlineKeyboardButton::callback("下一页", format!("rank_{}", valid_page + 1)));
     }
     if !row.is_empty() {
