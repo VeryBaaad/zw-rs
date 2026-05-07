@@ -8,7 +8,7 @@ use log::Level;
 #[command(rename_rule = "lowercase")]
 enum Command {
     Zw,
-    Rank,
+    Rank(String),
 }
 
 #[tokio::main]
@@ -60,7 +60,19 @@ async fn commands_handler(
     log(Level::Info, "commands_handler", &format!("Received command: {:?}", cmd));
     match cmd {
         Command::Zw => handle_zw(bot, msg, pool).await?,
-        Command::Rank => handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, 0).await?,
+        Command::Rank(arg) => {
+            let page = if arg.is_empty() {
+                0
+            } else {
+                arg.trim()
+                .parse::<usize>()
+                .ok()
+                .map(|p| if p > 0 { p - 1 } else { 0 })
+                .unwrap_or(0)
+            };
+            log(Level::Debug, "commands_handler", &format!("Parsed rank page argument: {}", page));
+            handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, page).await?;
+        }
     }
     Ok(())
 }
@@ -175,6 +187,21 @@ async fn handle_rank(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log(Level::Info, "handle_rank", &format!("Handling rank command: page={}", page));
     let per_page: i64 = 10;
+
+    log(Level::Debug, "handle_rank", "Querying total user count");
+    let total = sqlx::query("SELECT COUNT(*) as count FROM users")
+        .fetch_one(&pool)
+        .await?
+        .try_get::<i64, _>("count")? as usize;
+    log(Level::Debug, "handle_rank", &format!("Total users in database: {}", total));
+
+    let max_page_index = if total > 0 {
+        ((total as f64 / per_page as f64).ceil() as usize) - 1
+    } else {
+        0
+    };
+
+    let valid_page = if page <= max_page_index { page } else { 0 };
     let offset: i64 = (page as i64) * per_page;
     log(Level::Debug, "handle_rank", &format!("Fetching rankings: per_page={}, offset={}", per_page, offset));
 
@@ -188,13 +215,6 @@ async fn handle_rank(
     .await?;
     log(Level::Debug, "handle_rank", &format!("Retrieved {} users from database", rows.len()));
 
-    log(Level::Debug, "handle_rank", "Querying total user count");
-    let total = sqlx::query("SELECT COUNT(*) as count FROM users")
-        .fetch_one(&pool)
-        .await?
-        .try_get::<i64, _>("count")? as usize;
-    log(Level::Debug, "handle_rank", &format!("Total users in database: {}", total));
-
     let mut text = "自慰排行榜\n\n".to_string();
     for (i, row) in rows.iter().enumerate() {
         let rank = (offset + i as i64 + 1) as usize;
@@ -206,11 +226,11 @@ async fn handle_rank(
 
     let mut keyboard = InlineKeyboardMarkup::default();
     let mut row = Vec::new();
-    if page > 0 {
-        row.push(teloxide::types::InlineKeyboardButton::callback("上一页", format!("rank_{}", page - 1)));
+    if valid_page > 0 {
+        row.push(teloxide::types::InlineKeyboardButton::callback("上一页", format!("rank_{}", valid_page - 1)));
     }
     if (offset + per_page) < (total as i64) {
-        row.push(teloxide::types::InlineKeyboardButton::callback("下一页", format!("rank_{}", page + 1)));
+        row.push(teloxide::types::InlineKeyboardButton::callback("下一页", format!("rank_{}", valid_page + 1)));
     }
     if !row.is_empty() {
         keyboard.inline_keyboard.push(row);
