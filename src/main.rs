@@ -7,7 +7,7 @@ use log::Level;
 #[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
 enum Command {
-    Zw,
+    Zw(String),
     Rank(String),
 }
 
@@ -59,7 +59,16 @@ async fn commands_handler(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log(Level::Info, "commands_handler", &format!("Received command: {:?}", cmd));
     match cmd {
-        Command::Zw => handle_zw(bot, msg, pool).await?,
+        Command::Zw(arg) => {
+            let arg = arg.trim();
+            if arg.is_empty() {
+                log(Level::Debug, "commands_handler", "No argument provided for zw command, treating as empty");
+                handle_zw(bot, msg, pool, None).await?
+            } else {
+                log(Level::Debug, "commands_handler", &format!("Received argument for zw command: '{}'", arg));
+                handle_zw(bot, msg, pool, Some(arg.to_string())).await?
+            }
+        },
         Command::Rank(arg) => {
             let page = if arg.is_empty() {
                 0
@@ -78,6 +87,176 @@ async fn commands_handler(
 }
 
 async fn handle_zw(
+    bot: Bot,
+    msg: Message,
+    pool: SqlitePool,
+    target_arg: Option<String>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let user = msg.from.as_ref().unwrap();
+    let initiator_id = user.id.0 as i64;
+    let initiator_username = user.username.as_deref().unwrap_or("未知用户");
+    let initiator_name = match user.last_name.as_deref() {
+        Some(last_name) => format!("{} {}", user.first_name, last_name),
+        None => user.first_name.clone(),
+    };
+
+    let now = Utc::now();
+    let cd_duration = Duration::minutes(30);
+
+    // find the target user record by id or username
+    async fn find_user_record(pool: &SqlitePool, key: &str) -> Result<Option<(i64, Option<chrono::DateTime<Utc>>, String, i64)>, sqlx::Error> {
+        // try to parse as user_id first
+        if let Ok(id) = key.parse::<i64>() {
+            if let Some(row) = sqlx::query("SELECT count, last_time, username, user_id FROM users WHERE user_id = ?")
+                .bind(id)
+                .fetch_optional(pool)
+                .await? {
+                let count: i64 = row.try_get("count")?;
+                let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
+                let username: String = row.try_get("username")?;
+                let user_id: i64 = row.try_get("user_id")?;
+                return Ok(Some((count, last_time, username, user_id)));
+            }
+            Ok(None)
+        } else {
+            // try to parse as username (with optional @)
+            let uname = key.trim_start_matches('@');
+            if let Some(row) = sqlx::query("SELECT count, last_time, username, user_id FROM users WHERE username = ?")
+                .bind(uname)
+                .fetch_optional(pool)
+                .await? {
+                let count: i64 = row.try_get("count")?;
+                let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
+                let username: String = row.try_get("username")?;
+                let user_id: i64 = row.try_get("user_id")?;
+                return Ok(Some((count, last_time, username, user_id)));
+            }
+            Ok(None)
+        }
+    }
+
+    if target_arg.is_none() {
+        return handle_zw_self(bot, msg, pool).await;
+    }
+
+    let target_key = target_arg.unwrap();
+    let target_key = target_key.trim().trim_start_matches('@').to_string();
+
+    let target_record = find_user_record(&pool, &target_key).await?;
+    if target_record.is_none() {
+        let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
+        let _ = bot.send_message(msg.chat.id, text)
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await;
+        return Ok(());
+    }
+    let (target_count, target_last_time_opt, target_username, target_user_id) = target_record.unwrap();
+
+    let initiator_row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
+        .bind(initiator_id)
+        .fetch_optional(&pool)
+        .await?;
+    let (initiator_count, initiator_last_time_opt) = if let Some(row) = initiator_row {
+        let c: i64 = row.try_get("count")?;
+        let lt: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
+        (c, lt)
+    } else {
+        (0, None)
+    };
+
+    let mut any_in_cd = false;
+    let mut cd_messages = Vec::new();
+
+    if let Some(lt) = initiator_last_time_opt {
+        let next = lt + cd_duration;
+        if now < next {
+            any_in_cd = true;
+            let remaining = next - now;
+            let mins = remaining.num_minutes();
+            let secs = remaining.num_seconds() % 60;
+            cd_messages.push(format!("发起者 {} 仍在冷却：{}分{}秒", initiator_name, mins, secs));
+        }
+    }
+    if let Some(lt) = target_last_time_opt {
+        let next = lt + cd_duration;
+        if now < next {
+            any_in_cd = true;
+            let remaining = next - now;
+            let mins = remaining.num_minutes();
+            let secs = remaining.num_seconds() % 60;
+            cd_messages.push(format!("另一位 {} 仍在冷却：{}分{}秒", target_username, mins, secs));
+        }
+    }
+
+    if any_in_cd {
+        let initiator_rank = get_rank(&pool, initiator_id).await.unwrap_or(0);
+        let target_rank = get_rank(&pool, target_user_id).await.unwrap_or(0);
+        let text = format!(
+            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{}\n次数：{}次\n排行榜位置：{}\n\n另一位：{}\n次数：{}次\n排行榜位置：{}\n\n{}",
+            initiator_name,
+            initiator_name, initiator_count, initiator_rank,
+            target_username, target_count, target_rank,
+            cd_messages.join("\n")
+        );
+        let _ = bot.send_message(msg.chat.id, text)
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await;
+        return Ok(());
+    }
+
+    let new_initiator_count = initiator_count + 1;
+    let new_target_count = target_count + 1;
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+         username = excluded.username,
+         count = excluded.count,
+         last_time = excluded.last_time"
+    )
+    .bind(initiator_id)
+    .bind(initiator_username)
+    .bind(new_initiator_count)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+         username = excluded.username,
+         count = excluded.count,
+         last_time = excluded.last_time"
+    )
+    .bind(target_user_id)
+    .bind(&target_username)
+    .bind(new_target_count)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    let initiator_rank = get_rank(&pool, initiator_id).await?;
+    let target_rank = get_rank(&pool, target_user_id).await?;
+
+    let text = format!(
+        "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
+        initiator_name, target_username,
+        initiator_name, target_username,
+        new_initiator_count, new_target_count,
+        initiator_rank, target_rank
+    );
+
+    bot.send_message(msg.chat.id, text)
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
+
+    Ok(())
+}
+
+async fn handle_zw_self(
     bot: Bot,
     msg: Message,
     pool: SqlitePool,
