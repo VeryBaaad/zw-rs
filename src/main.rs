@@ -158,7 +158,7 @@ async fn handle_zw(
     .execute(&pool)
     .await {
         log(Level::Error, "handle_zw", &format!("Failed to update user in database: {}", e));
-        return Err(Box::new(e));
+        return Err(e.into());
     }
     log(Level::Debug, "handle_zw", "Database update successful");
 
