@@ -117,7 +117,7 @@ async fn handle_zw(
                 let user_id: i64 = row.try_get("user_id")?;
                 return Ok(Some((count, last_time, username, user_id)));
             }
-            return Ok(None);
+            Ok(None)
         } else {
             // try to parse as username (with optional @)
             let uname = key.trim_start_matches('@');
@@ -131,7 +131,7 @@ async fn handle_zw(
                 let user_id: i64 = row.try_get("user_id")?;
                 return Ok(Some((count, last_time, username, user_id)));
             }
-            return Ok(None);
+            Ok(None)
         }
     }
 
