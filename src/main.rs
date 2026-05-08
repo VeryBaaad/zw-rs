@@ -535,8 +535,8 @@ async fn inline_query_handler(
         let mut results: Vec<InlineQueryResult> = Vec::new();
         
         // Try to interpret as userid for zw
-        if let Ok(user_id) = parts[0].parse::<i64>() {
-            if user_exists(&pool, user_id).await? {
+        if let Ok(user_id) = parts[0].parse::<i64>()
+            && user_exists(&pool, user_id).await? {
                 let zw_text = "点击下方按钮进行紫薇\n直接爽4！";
                 let mut zw_keyboard = InlineKeyboardMarkup::default();
                 zw_keyboard.inline_keyboard.push(vec![
@@ -561,7 +561,6 @@ async fn inline_query_handler(
                 
                 log(Level::Debug, "inline_query_handler", &format!("User {} exists, showing zw option", user_id));
             }
-        }
         
         // Try to interpret as rank page
         if let Ok(page) = parts[0].parse::<usize>() {
