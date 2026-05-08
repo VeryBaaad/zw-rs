@@ -1,5 +1,5 @@
 use std::env;
-use teloxide::{prelude::*, types::{InlineKeyboardMarkup, MessageId, ReplyParameters}, utils::command::BotCommands};
+use teloxide::{prelude::*, types::{InlineKeyboardMarkup, MessageId, ReplyParameters, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent}, utils::command::BotCommands};
 use sqlx::{SqlitePool, Row};
 use chrono::{Utc, Duration};
 use log::Level;
@@ -41,7 +41,8 @@ async fn main() {
 
     let handler = dptree::entry()
         .branch(Update::filter_message().filter_command::<Command>().endpoint(commands_handler))
-        .branch(Update::filter_callback_query().endpoint(callback_handler));
+        .branch(Update::filter_callback_query().endpoint(callback_handler))
+        .branch(Update::filter_inline_query().endpoint(inline_query_handler));
 
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![pool])
@@ -463,6 +464,201 @@ async fn callback_handler(
             }
         }
     Ok(())
+}
+
+async fn inline_query_handler(
+    bot: Bot,
+    q: InlineQuery,
+    pool: SqlitePool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log(Level::Debug, "inline_query_handler", &format!("Received inline query: '{}'", q.query));
+    
+    let query = q.query.trim();
+    
+    if query.is_empty() {
+        // No parameters - show both zw and rank buttons
+        log(Level::Debug, "inline_query_handler", "No parameters, showing zw and rank options");
+        
+        let mut results: Vec<InlineQueryResult> = Vec::new();
+        
+        // Zw option
+        let zw_text = "点击下方按钮进行紫薇\n直接爽4！";
+        let mut zw_keyboard = InlineKeyboardMarkup::default();
+        zw_keyboard.inline_keyboard.push(vec![
+            teloxide::types::InlineKeyboardButton::callback("自慰", "zw_self"),
+            teloxide::types::InlineKeyboardButton::callback("排行榜", "rank_0"),
+        ]);
+        
+        let zw_article = InlineQueryResultArticle::new(
+            "zw",
+            "自慰",
+            InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                message_text: zw_text.to_string(),
+                parse_mode: None,
+                entities: None,
+                link_preview_options: None,
+            }),
+        )
+        .description("30分钟进行一次")
+        .reply_markup(zw_keyboard);
+        
+        results.push(InlineQueryResult::Article(zw_article));
+        
+        // Rank option
+        let rank_text = "！？排行榜？！";
+        let rank_keyboard = get_rank_keyboard(&pool, 0).await.unwrap_or_default();
+        
+        let rank_article = InlineQueryResultArticle::new(
+            "rank",
+            "排行榜",
+            InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                message_text: rank_text.to_string(),
+                parse_mode: None,
+                entities: None,
+                link_preview_options: None,
+            }),
+        )
+        .description("谁更多")
+        .reply_markup(rank_keyboard);
+        
+        results.push(InlineQueryResult::Article(rank_article));
+        
+        if let Err(e) = bot.answer_inline_query(q.id, results).await {
+            log(Level::Error, "inline_query_handler", &format!("Failed to answer inline query: {}", e));
+            return Err(Box::new(e));
+        }
+    } else {
+        // Parameters provided - parse and validate
+        log(Level::Debug, "inline_query_handler", &format!("Parameters provided: '{}'", query));
+        
+        let parts: Vec<&str> = query.split_whitespace().collect();
+        let mut results: Vec<InlineQueryResult> = Vec::new();
+        
+        // Try to interpret as userid for zw
+        if let Ok(user_id) = parts[0].parse::<i64>() {
+            if user_exists(&pool, user_id).await? {
+                let zw_text = "点击下方按钮进行紫薇\n直接爽4！";
+                let mut zw_keyboard = InlineKeyboardMarkup::default();
+                zw_keyboard.inline_keyboard.push(vec![
+                    teloxide::types::InlineKeyboardButton::callback("自慰", format!("zw_user_{}", user_id)),
+                    teloxide::types::InlineKeyboardButton::callback("排行榜", "rank_0"),
+                ]);
+                
+                let zw_article = InlineQueryResultArticle::new(
+                    "zw",
+                    "自慰",
+                    InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                        message_text: zw_text.to_string(),
+                        parse_mode: None,
+                        entities: None,
+                        link_preview_options: None,
+                    }),
+                )
+                .description("30分钟进行一次")
+                .reply_markup(zw_keyboard);
+                
+                results.push(InlineQueryResult::Article(zw_article));
+                
+                log(Level::Debug, "inline_query_handler", &format!("User {} exists, showing zw option", user_id));
+            }
+        }
+        
+        // Try to interpret as rank page
+        if let Ok(page) = parts[0].parse::<usize>() {
+            let per_page: i64 = 10;
+            let total = get_total_users(&pool).await?;
+            let max_page_index = if total > 0 {
+                ((total as f64 / per_page as f64).ceil() as usize) - 1
+            } else {
+                0
+            };
+            
+            let valid_page = if page <= max_page_index { page } else { 0 };
+            
+            let rank_text = "！？排行榜？！";
+            let rank_keyboard = get_rank_keyboard(&pool, valid_page).await.unwrap_or_default();
+            
+            let rank_article = InlineQueryResultArticle::new(
+                "rank",
+                "排行榜",
+                InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                    message_text: rank_text.to_string(),
+                    parse_mode: None,
+                    entities: None,
+                    link_preview_options: None,
+                }),
+            )
+            .description("谁更多")
+            .reply_markup(rank_keyboard);
+            
+            results.push(InlineQueryResult::Article(rank_article));
+            
+            log(Level::Debug, "inline_query_handler", &format!("Valid rank page {}, showing rank option", valid_page));
+        }
+        
+        if results.is_empty() {
+            log(Level::Debug, "inline_query_handler", "No valid results for parameters");
+        }
+        
+        if let Err(e) = bot.answer_inline_query(q.id, results).await {
+            log(Level::Error, "inline_query_handler", &format!("Failed to answer inline query: {}", e));
+            return Err(Box::new(e));
+        }
+    }
+    
+    Ok(())
+}
+
+async fn user_exists(pool: &SqlitePool, user_id: i64) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    log(Level::Debug, "user_exists", &format!("Checking if user {} exists", user_id));
+    let row = sqlx::query("SELECT user_id FROM users WHERE user_id = ?")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.is_some())
+}
+
+async fn get_total_users(pool: &SqlitePool) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+    log(Level::Debug, "get_total_users", "Fetching total user count");
+    let row = sqlx::query("SELECT COUNT(*) as count FROM users")
+        .fetch_one(pool)
+        .await?;
+    let count: i64 = row.try_get("count")?;
+    Ok(count)
+}
+
+async fn get_rank_keyboard(
+    pool: &SqlitePool,
+    page: usize,
+) -> Result<InlineKeyboardMarkup, Box<dyn std::error::Error + Send + Sync>> {
+    log(Level::Debug, "get_rank_keyboard", &format!("Generating rank keyboard for page {}", page));
+    
+    let per_page: i64 = 10;
+    let total = get_total_users(pool).await? as usize;
+    
+    let max_page_index = if total > 0 {
+        ((total as f64 / per_page as f64).ceil() as usize) - 1
+    } else {
+        0
+    };
+    
+    let valid_page = if page <= max_page_index { page } else { 0 };
+    
+    let mut keyboard = InlineKeyboardMarkup::default();
+    let mut row = Vec::new();
+    
+    if valid_page > 0 {
+        row.push(teloxide::types::InlineKeyboardButton::callback("上一页", format!("rank_{}", valid_page - 1)));
+    }
+    if (valid_page + 1) * (per_page as usize) < total {
+        row.push(teloxide::types::InlineKeyboardButton::callback("下一页", format!("rank_{}", valid_page + 1)));
+    }
+    
+    if !row.is_empty() {
+        keyboard.inline_keyboard.push(row);
+    }
+    
+    Ok(keyboard)
 }
 
 async fn get_rank(pool: &SqlitePool, user_id: i64) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
