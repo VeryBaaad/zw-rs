@@ -651,8 +651,24 @@ async fn callback_handler(
             return Ok(());
         }
 
-        if data == "zw_self" {
+        if let Some(stripped) = data.strip_prefix("zw_self_") {
             log(Level::Debug, "callback_handler", "zw_self callback");
+            let expected_initiator_id = match stripped.parse::<i64>() {
+                Ok(id) => id,
+                Err(_) => {
+                    log(Level::Warn, "callback_handler", &format!("Invalid zw_self callback data: {}", data));
+                    let _ = bot.answer_callback_query(q.id).await;
+                    return Ok(());
+                }
+            };
+
+            let actual_initiator_id = q.from.id.0 as i64;
+            if actual_initiator_id != expected_initiator_id {
+                log(Level::Warn, "callback_handler", &format!("Permission denied: {} tried to click zw_self initiated by {}", actual_initiator_id, expected_initiator_id));
+                let _ = bot.answer_callback_query(q.id).show_alert(true).text("只有发起人可以点击此按钮").await;
+                return Ok(());
+            }
+
             let from = &q.from;
             let user_id = from.id.0 as i64;
             let username = from.username.as_deref().unwrap_or("未知用户");
@@ -673,14 +689,12 @@ async fn callback_handler(
                                 log(Level::Error, "callback_handler", &format!("send_message fallback failed: {}", e2));
                             }
                         }
-                    }
-                    else if let Some(inline_id) = &q.inline_message_id {
+                    } else if let Some(inline_id) = &q.inline_message_id {
                         log(Level::Debug, "callback_handler", &format!("zw_self: editing inline_message_id {}", inline_id));
                         if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).await {
                             log(Level::Error, "callback_handler", &format!("edit_message_text_inline failed: {}", e));
                         }
-                    }
-                    else {
+                    } else {
                         log(Level::Warn, "callback_handler", "zw_self: no q.message and no inline_message_id, sending DM");
                         if let Err(e) = bot.send_message(ChatId(user_id), text.clone()).await {
                             log(Level::Error, "callback_handler", &format!("send DM failed: {}", e));
@@ -690,14 +704,12 @@ async fn callback_handler(
                 Err(e) => {
                     log(Level::Error, "callback_handler", &format!("process_zw_for_user failed: {}", e));
                     if let Some(msg) = &q.message {
-                        let chat_id = msg.chat().id;
-                        let _ = bot.send_message(chat_id, "发生错误，请稍后重试").await;
+                        let _ = bot.send_message(msg.chat().id, "发生错误，请稍后重试").await;
                     } else {
                         let _ = bot.send_message(ChatId(user_id), "发生错误，请稍后重试").await;
                     }
                 }
             }
-
             let _ = bot.answer_callback_query(q.id).await;
             return Ok(());
         }
@@ -816,10 +828,11 @@ async fn inline_query_handler(
         }
     }.await;
 
+    let initiator_id = q.from.id.0 as i64;
     let zw_text = "点击下方按钮进行紫薇\n直接爽4！";
     let mut zw_kb = InlineKeyboardMarkup::default();
     zw_kb.inline_keyboard.push(vec![
-        teloxide::types::InlineKeyboardButton::callback("自慰", "zw_self"),
+        teloxide::types::InlineKeyboardButton::callback("自慰", format!("zw_self_{}", initiator_id)),
     ]);
     let zw_article = InlineQueryResultArticle::new(
         format!("zw_{}", chrono::Utc::now().timestamp_millis()),
