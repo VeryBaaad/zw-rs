@@ -704,50 +704,64 @@ async fn callback_handler(
 
         if let Some(stripped) = data.strip_prefix("zw_user_") {
             log(Level::Debug, "callback_handler", &format!("zw_user callback: {}", data));
-            if let Ok(target_id) = stripped.parse::<i64>() {
-                let from = &q.from;
-                let initiator_id = from.id.0 as i64;
-                let initiator_username = from.username.as_deref().unwrap_or("未知用户");
-                let initiator_name = match from.last_name.as_deref() {
-                    Some(last) => format!("{} {}", from.first_name.clone(), last),
-                    None => from.first_name.clone(),
-                };
-
-                let target_username = match sqlx::query("SELECT username FROM users WHERE user_id = ?")
-                    .bind(target_id)
-                    .fetch_optional(&pool)
-                    .await {
-                        Ok(Some(row)) => row.try_get::<String, _>("username").unwrap_or_else(|_| "User".to_string()),
-                        _ => "User".to_string(),
+            // Parse target_id_initiator_id format
+            let parts: Vec<&str> = stripped.split('_').collect();
+            if parts.len() == 2 {
+                if let (Ok(target_id), Ok(expected_initiator_id)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                    let from = &q.from;
+                    let actual_initiator_id = from.id.0 as i64;
+                    
+                    // Check permission: only allow the query initiator
+                    if actual_initiator_id != expected_initiator_id {
+                        log(Level::Warn, "callback_handler", &format!("Permission denied: {} tried to use button initiated by {}", actual_initiator_id, expected_initiator_id));
+                        let _ = bot.answer_callback_query(q.id).show_alert(true).text("只有发起人可以点击此按钮").await;
+                        return Ok(());
+                    }
+                    
+                    let initiator_username = from.username.as_deref().unwrap_or("未知用户");
+                    let initiator_name = match from.last_name.as_deref() {
+                        Some(last) => format!("{} {}", from.first_name.clone(), last),
+                        None => from.first_name.clone(),
                     };
 
-                match process_zw_help_for_user(&pool, initiator_id, initiator_username, &initiator_name, target_id, &target_username).await {
-                    Ok(text) => {
-                        if let Some(msg) = &q.message {
-                            log(Level::Debug, "callback_handler", "zw_user: editing q.message");
-                            let chat_id = msg.chat().id;
-                            let message_id = msg.id();
-                            if let Err(e) = bot.edit_message_text(chat_id, message_id, text.clone()).await {
-                                log(Level::Error, "callback_handler", &format!("edit_message_text failed: {}", e));
-                                if let Err(e2) = bot.send_message(chat_id, text.clone()).await {
-                                    log(Level::Error, "callback_handler", &format!("send_message fallback failed: {}", e2));
+                    let target_username = match sqlx::query("SELECT username FROM users WHERE user_id = ?")
+                        .bind(target_id)
+                        .fetch_optional(&pool)
+                        .await {
+                            Ok(Some(row)) => row.try_get::<String, _>("username").unwrap_or_else(|_| "User".to_string()),
+                            _ => "User".to_string(),
+                        };
+
+                    match process_zw_help_for_user(&pool, actual_initiator_id, initiator_username, &initiator_name, target_id, &target_username).await {
+                        Ok(text) => {
+                            if let Some(msg) = &q.message {
+                                log(Level::Debug, "callback_handler", "zw_user: editing q.message");
+                                let chat_id = msg.chat().id;
+                                let message_id = msg.id();
+                                if let Err(e) = bot.edit_message_text(chat_id, message_id, text.clone()).await {
+                                    log(Level::Error, "callback_handler", &format!("edit_message_text failed: {}", e));
+                                    if let Err(e2) = bot.send_message(chat_id, text.clone()).await {
+                                        log(Level::Error, "callback_handler", &format!("send_message fallback failed: {}", e2));
+                                    }
                                 }
+                            } else if let Some(inline_id) = &q.inline_message_id {
+                                log(Level::Debug, "callback_handler", &format!("zw_user: editing inline_message_id {}", inline_id));
+                                if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).await {
+                                    log(Level::Error, "callback_handler", &format!("edit_message_text_inline failed: {}", e));
+                                }
+                            } else {
+                                log(Level::Warn, "callback_handler", "zw_user callback but q.message and inline_message_id are None");
                             }
-                        } else if let Some(inline_id) = &q.inline_message_id {
-                            log(Level::Debug, "callback_handler", &format!("zw_user: editing inline_message_id {}", inline_id));
-                            if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).await {
-                                log(Level::Error, "callback_handler", &format!("edit_message_text_inline failed: {}", e));
-                            }
-                        } else {
-                            log(Level::Warn, "callback_handler", "zw_user callback but q.message and inline_message_id are None");
+                        }
+                        Err(e) => {
+                            log(Level::Error, "callback_handler", &format!("process_zw_help_for_user failed: {}", e));
                         }
                     }
-                    Err(e) => {
-                        log(Level::Error, "callback_handler", &format!("process_zw_help_for_user failed: {}", e));
-                    }
+                } else {
+                    log(Level::Warn, "callback_handler", &format!("Invalid zw_user format in callback: {}", data));
                 }
             } else {
-                log(Level::Warn, "callback_handler", &format!("Invalid zw_user id in callback: {}", data));
+                log(Level::Warn, "callback_handler", &format!("Invalid zw_user format in callback: {}", data));
             }
             let _ = bot.answer_callback_query(q.id).await;
             return Ok(());
@@ -846,12 +860,13 @@ async fn inline_query_handler(
     if !query.is_empty() {
         if let Ok(user_id) = query.parse::<i64>() {
             if user_exists(&pool, user_id).await? {
+                let initiator_id = q.from.id.0 as i64;
                 let mut kb = InlineKeyboardMarkup::default();
                 kb.inline_keyboard.push(vec![
-                    teloxide::types::InlineKeyboardButton::callback("自慰 (目标)", format!("zw_user_{}", user_id)),
+                    teloxide::types::InlineKeyboardButton::callback("自慰 (目标)", format!("zw_user_{}_{}", user_id, initiator_id)),
                 ]);
                 let art = InlineQueryResultArticle::new(
-                    format!("zw_user_{}", user_id),
+                    format!("zw_user_{}_{}", user_id, initiator_id),
                     format!("自慰 {}", user_id),
                     InputMessageContent::Text(teloxide::types::InputMessageContentText {
                         message_text: format!("对用户 {} 的操作", user_id),
