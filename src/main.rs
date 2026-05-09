@@ -635,8 +635,8 @@ async fn callback_handler(
         log(Level::Debug, "callback_handler", &format!("Received callback data: {}", data));
 
         // rank pagination
-        if data.starts_with("rank_") {
-            let page: usize = data[5..].parse().unwrap_or(0);
+        if let Some(stripped) = data.strip_prefix("rank_") {
+            let page: usize = stripped.parse().unwrap_or(0);
             log(Level::Debug, "callback_handler", &format!("rank callback page: {}", page));
             if let Some(msg) = &q.message {
                 let chat_id = msg.chat().id;
@@ -702,9 +702,9 @@ async fn callback_handler(
             return Ok(());
         }
 
-        if data.starts_with("zw_user_") {
+        if let Some(stripped) = data.strip_prefix("zw_user_") {
             log(Level::Debug, "callback_handler", &format!("zw_user callback: {}", data));
-            if let Ok(target_id) = data[8..].parse::<i64>() {
+            if let Ok(target_id) = stripped.parse::<i64>() {
                 let from = &q.from;
                 let initiator_id = from.id.0 as i64;
                 let initiator_username = from.username.as_deref().unwrap_or("未知用户");
