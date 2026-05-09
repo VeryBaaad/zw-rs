@@ -770,6 +770,38 @@ async fn inline_query_handler(
     let query = q.query.trim();
     let mut results: Vec<InlineQueryResult> = Vec::new();
 
+    // Generate rank text and keyboard
+    let per_page: i64 = 10;
+    let rank_text = async {
+        match async {
+            let _total = get_total_users(&pool).await? as i64;
+            let offset: i64 = 0;
+            let rows = sqlx::query(
+                "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
+            )
+            .bind(per_page)
+            .bind(offset)
+            .fetch_all(&pool)
+            .await?;
+            
+            let mut text = "自慰排行榜\n\n".to_string();
+            for (i, row) in rows.iter().enumerate() {
+                let rank = (i as i64 + 1) as usize;
+                let username: String = row.try_get("username")?;
+                let count: i64 = row.try_get("count")?;
+                let user_id: i64 = row.try_get("user_id")?;
+                text.push_str(&format!("{}. {}: {}次\n{}\n", rank, username, count, user_id));
+            }
+            Ok::<String, Box<dyn std::error::Error + Send + Sync>>(text)
+        }.await {
+            Ok(t) => t,
+            Err(e) => {
+                log(Level::Error, "inline_query_handler", &format!("Generate rank text error: {}", e));
+                "排行榜加载失败".to_string()
+            }
+        }
+    }.await;
+
     let zw_text = "点击下方按钮进行紫薇\n直接爽4！";
     let mut zw_kb = InlineKeyboardMarkup::default();
     zw_kb.inline_keyboard.push(vec![
@@ -789,7 +821,6 @@ async fn inline_query_handler(
     .reply_markup(zw_kb);
     results.push(InlineQueryResult::Article(zw_article));
 
-    let rank_text = "！？排行榜？！";
     let rank_keyboard = match get_rank_keyboard(&pool, 0).await {
         Ok(k) => k,
         Err(e) => {
@@ -801,7 +832,7 @@ async fn inline_query_handler(
         format!("rank_{}", chrono::Utc::now().timestamp_millis()),
         "排行榜",
         InputMessageContent::Text(teloxide::types::InputMessageContentText {
-            message_text: rank_text.to_string(),
+            message_text: rank_text,
             parse_mode: None,
             entities: None,
             link_preview_options: None,
