@@ -46,6 +46,10 @@ jobs:
         run: |
           cargo build --release --all-targets --all-features --workspace --target ${{ matrix.target }}
 
+      - name: Rename
+        if: matrix.os == 'windows-latest'
+        run: Rename-Item -Path ".\target\${{ matrix.target }}\release\zw-rs.exe" -NewName "zw-rs"
+
       - name: Upload release
         uses: actions/upload-artifact@v7
         with:
