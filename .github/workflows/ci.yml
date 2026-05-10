@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  run:
+    name: Build for (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: x86_64
+          - name: Linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - name: macOS
+            os: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.os == 'windows-latest'
+      - name: Setup Rust toolchain
+        run: |
+          rustup toolchain install
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
+          cache-all-crates: "true"
+
+      - name: Build
+        run: |
+          cargo build --release --all-targets --all-features --workspace --target ${{ matrix.target }}
+
+      - name: Upload release
+        uses: actions/upload-artifact@v7
+        with:
+          name: zw-rs-${{ matrix.arch }}-${{ matrix.name }}
+          path: "./target/${{ matrix.target }}/release/*"
