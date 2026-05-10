@@ -9,12 +9,13 @@ use log::Level;
 enum Command {
     Zw(String),
     Rank(String),
+    Version,
 }
 
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
-    log(Level::Info, "ZWBotDaemon", "Starting bot...");
+    log(Level::Info, "ZWBotDaemon", format!("Starting zw-rs v{} (commit {}, built at {})...", env!("CARGO_PKG_VERSION"), env!("GIT_HASH"), env!("BUILD_TIME")).as_str());
 
     let bot = Bot::from_env();
 
@@ -82,6 +83,9 @@ async fn commands_handler(
             };
             log(Level::Debug, "commands_handler", &format!("Parsed rank page argument: {}", page));
             handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, page).await?;
+        },
+        Command::Version => {
+            bot.send_message(msg.chat.id, format!("{} v{}\nCommit {}\nBuilt at {}\nTarget {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), env!("GIT_HASH"), env!("BUILD_TIME"), env!("BUILD_TARGET")));
         }
     }
     Ok(())
