@@ -27,7 +27,11 @@
 
 1. 设置环境变量：
    - `TELOXIDE_TOKEN`: Telegram Bot Token
-   - `DATABASE_URL`: SQLite数据库URL，例如 `sqlite:zw.db`
+   - *`DATABASE_URL`: SQLite数据库URL，例如 `sqlite:zw.db`
+   - *`TELOXIDE_API_URL`: 自定义Telegram API，例如 `https://api.telegram.org`
+   - *`TELOXIDE_PROXY`: 自定义Telegram代理
+
+> *表示非必须，即通过默认配置
 
 2. 运行：
    ```bash
