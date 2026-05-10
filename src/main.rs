@@ -194,8 +194,8 @@ async fn handle_zw(
         let target_rank = get_rank(&pool, target_user_id).await.unwrap_or(0);
         let text = format!(
             "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{} ({})\n次数：{}次\n排行榜位置：{}\n\n另一位：{} ({})\n次数：{}次\n排行榜位置：{}\n\n{}",
-            initiator_name, initiator_id,
-            initiator_name, initiator_count, initiator_rank,
+            initiator_name, initiator_name,
+            initiator_id, initiator_count, initiator_rank,
             target_username, target_user_id,
             target_count, target_rank,
             cd_messages.join("\n")
@@ -571,8 +571,8 @@ async fn process_zw_help_for_user(
         let target_rank = get_rank(pool, target_id).await.unwrap_or(0);
         return Ok(format!(
             "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{} ({})\n次数：{}次\n排行榜位置：{}\n\n另一位：{} ({})\n次数：{}次\n排行榜位置：{}\n\n{}",
-            initiator_name,initiator_id,
-            initiator_name, initiator_count, initiator_rank,
+            initiator_name,initiator_name,
+            initiator_id, initiator_count, initiator_rank,
             target_username, target_id, target_count, target_rank,
             cd_messages.join("\n")
         ));
