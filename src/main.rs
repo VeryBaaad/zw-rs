@@ -85,7 +85,7 @@ async fn commands_handler(
             handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, page).await?;
         },
         Command::Version => {
-            bot.send_message(msg.chat.id, format!("{} v{}\nCommit {}\nBuilt at {}\nTarget {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), env!("GIT_HASH"), env!("BUILD_TIME"), env!("BUILD_TARGET")));
+            let _ = bot.send_message(msg.chat.id, format!("{} v{}\nCommit {}\nBuilt at {}\nTarget {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), env!("GIT_HASH"), env!("BUILD_TIME"), env!("BUILD_TARGET")));
         }
     }
     Ok(())
