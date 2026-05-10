@@ -50,4 +50,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: zw-rs-${{ matrix.arch }}-${{ matrix.name }}
-          path: "./target/${{ matrix.target }}/release/*"
+          path: "./target/${{ matrix.target }}/release/zw-rs"
