@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
+ * SPDX-License-Identifier: MIT
+ */
 use std::env;
 use teloxide::{prelude::*, types::{InlineKeyboardMarkup, MessageId, ReplyParameters, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent}, utils::command::BotCommands};
 use sqlx::{SqlitePool, Row};
