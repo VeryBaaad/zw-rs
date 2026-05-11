@@ -180,7 +180,7 @@ async fn handle_zw(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("发起者 {}\n 仍在冷却：{}分{}秒", markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()), mins, secs));
+            cd_messages.push(format!("发起者 {} 仍在冷却：{}分{}秒", markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()), mins, secs));
         }
     }
     if let Some(lt) = target_last_time_opt {
@@ -190,7 +190,7 @@ async fn handle_zw(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("另一位 {}\n 仍在冷却：{}分{}秒", markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()), mins, secs));
+            cd_messages.push(format!("另一位 {} 仍在冷却：{}分{}秒", markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()), mins, secs));
         }
     }
 
@@ -504,7 +504,7 @@ async fn process_zw_help_for_user(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("发起者 {}\n 仍在冷却：{}分{}秒", markdown::user_mention(UserId(initiator_id as u64), initiator_name), mins, secs));
+            cd_messages.push(format!("发起者 {} 仍在冷却：{}分{}秒", markdown::user_mention(UserId(initiator_id as u64), initiator_name), mins, secs));
         }
     }
     if let Some(lt) = target_last_time_opt {
@@ -514,7 +514,7 @@ async fn process_zw_help_for_user(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("另一位 {}\n 仍在冷却：{}分{}秒", markdown::user_mention(UserId(target_id as u64), target_username), mins, secs));
+            cd_messages.push(format!("另一位 {} 仍在冷却：{}分{}秒", markdown::user_mention(UserId(target_id as u64), target_username), mins, secs));
         }
     }
 
