@@ -16,3 +16,19 @@ tokio = { version = "1.52.2", features = ["rt-multi-thread", "macros"] }
 
 [build-dependencies]
 chrono = "0.4.44"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = 'abort'
+debug = false
+strip = true
+
+[profile.dev]
+opt-level = 0
+lto = false
+codegen-units = 1
+panic = 'unwind'
+debug = true
+strip = false
