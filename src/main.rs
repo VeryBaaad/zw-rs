@@ -214,34 +214,8 @@ async fn handle_zw(
     let new_target_count = target_count + 1;
 
     let mut tx = pool.begin().await?;
-    sqlx::query(
-        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-         username = excluded.username,
-         count = excluded.count,
-         last_time = excluded.last_time"
-    )
-    .bind(initiator_id)
-    .bind(initiator_username)
-    .bind(new_initiator_count)
-    .bind(now)
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query(
-        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-         username = excluded.username,
-         count = excluded.count,
-         last_time = excluded.last_time"
-    )
-    .bind(target_user_id)
-    .bind(&target_username)
-    .bind(new_target_count)
-    .bind(now)
-    .execute(&mut *tx)
-    .await?;
-
+    upsert_user(&mut *tx, initiator_id, initiator_username, new_initiator_count, now).await?;
+    upsert_user(&mut *tx, target_user_id, &target_username, new_target_count, now).await?;
     tx.commit().await?;
 
     let initiator_rank = get_rank(&pool, initiator_id).await?;
@@ -328,24 +302,7 @@ async fn handle_zw_self(
     // Update count and last_time
     let new_count = current_count + 1;
     log(Level::Info, "handle_zw", &format!("Updating user count: {} -> {}", current_count, new_count));
-    log(Level::Debug, "handle_zw", "Inserting/updating user in database");
-    if let Err(e) = sqlx::query(
-        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-         username = excluded.username,
-         count = excluded.count,
-         last_time = excluded.last_time"
-    )
-    .bind(user_id)
-    .bind(username)
-    .bind(new_count)
-    .bind(now)
-    .execute(&pool)
-    .await {
-        log(Level::Error, "handle_zw", &format!("Failed to update user in database: {}", e));
-        return Err(e.into());
-    }
-    log(Level::Debug, "handle_zw", "Database update successful");
+    upsert_user(&pool, user_id, username, new_count, now).await?;
 
     let rank = get_rank(&pool, user_id).await?;
     let text = format!(
@@ -485,19 +442,7 @@ async fn process_zw_for_user(
 
     // Update count and last_time
     let new_count = current_count + 1;
-    sqlx::query(
-        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-         username = excluded.username,
-         count = excluded.count,
-         last_time = excluded.last_time"
-    )
-    .bind(user_id)
-    .bind(username)
-    .bind(new_count)
-    .bind(now)
-    .execute(pool)
-    .await?;
+    upsert_user(pool, user_id, username, new_count, now).await?;
 
     let rank = get_rank(pool, user_id).await?;
     let text = format!(
@@ -587,33 +532,8 @@ async fn process_zw_help_for_user(
     let new_target_count = target_count + 1;
 
     let mut tx = pool.begin().await?;
-    sqlx::query(
-        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-         username = excluded.username,
-         count = excluded.count,
-         last_time = excluded.last_time"
-    )
-    .bind(initiator_id)
-    .bind(initiator_username)
-    .bind(new_initiator_count)
-    .bind(now)
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query(
-        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-         username = excluded.username,
-         count = excluded.count,
-         last_time = excluded.last_time"
-    )
-    .bind(target_id)
-    .bind(target_username)
-    .bind(new_target_count)
-    .bind(now)
-    .execute(&mut *tx)
-    .await?;
+    upsert_user(&mut *tx, initiator_id, initiator_username, new_initiator_count, now).await?;
+    upsert_user(&mut *tx, target_id, target_username, new_target_count, now).await?;
 
     tx.commit().await?;
 
@@ -968,6 +888,36 @@ async fn inline_query_handler(
     Ok(())
 }
 
+async fn upsert_user<'a, E>(
+    pool: E, 
+    user_id: i64, 
+    username: &str, 
+    new_count: i64, 
+    now: chrono::DateTime<Utc>
+) -> Result<(), sqlx::Error> 
+where 
+    E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+{
+    log(Level::Debug, "handle_zw", "Inserting/updating user in database");
+    if let Err(e) = sqlx::query(
+        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+         username = excluded.username,
+         count = excluded.count,
+         last_time = excluded.last_time"
+    )
+    .bind(user_id)
+    .bind(username)
+    .bind(new_count)
+    .bind(now)
+    .execute(pool)
+    .await {
+        log(Level::Error, "handle_zw", &format!("Failed to update user in database: {}", e));
+        return Err(e);
+    }
+    log(Level::Debug, "handle_zw", "Database update successful");
+    Ok(())
+}
 
 async fn user_exists(pool: &SqlitePool, user_id: i64) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
     log(Level::Debug, "user_exists", &format!("Checking if user {} exists", user_id));
