@@ -3,6 +3,7 @@ use teloxide::{prelude::*, types::{InlineKeyboardMarkup, MessageId, ReplyParamet
 use sqlx::{SqlitePool, Row};
 use chrono::{Utc, Duration};
 use log::Level;
+use teloxide::utils::markdown;
 
 #[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
@@ -179,7 +180,7 @@ async fn handle_zw(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("发起者 {}({})\n 仍在冷却：{}分{}秒", initiator_name, initiator_id, mins, secs));
+            cd_messages.push(format!("发起者 {}\n 仍在冷却：{}分{}秒", markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()), mins, secs));
         }
     }
     if let Some(lt) = target_last_time_opt {
@@ -189,7 +190,7 @@ async fn handle_zw(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("另一位 {}({})\n 仍在冷却：{}分{}秒", target_username, target_user_id, mins, secs));
+            cd_messages.push(format!("另一位 {}\n 仍在冷却：{}分{}秒", markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()), mins, secs));
         }
     }
 
@@ -197,10 +198,10 @@ async fn handle_zw(
         let initiator_rank = get_rank(&pool, initiator_id).await.unwrap_or(0);
         let target_rank = get_rank(&pool, target_user_id).await.unwrap_or(0);
         let text = format!(
-            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{} ({})\n次数：{}次\n排行榜位置：{}\n\n另一位：{} ({})\n次数：{}次\n排行榜位置：{}\n\n{}",
-            initiator_name, initiator_name,
-            initiator_id, initiator_count, initiator_rank,
-            target_username, target_user_id,
+            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{}\n次数：{}次\n排行榜位置：{}\n\n另一位：{}\n次数：{}次\n排行榜位置：{}\n\n{}",
+            initiator_name,
+            markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()), initiator_count, initiator_rank,
+            markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
             target_count, target_rank,
             cd_messages.join("\n")
         );
@@ -222,9 +223,9 @@ async fn handle_zw(
     let target_rank = get_rank(&pool, target_user_id).await?;
 
     let text = format!(
-        "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
-        initiator_name, target_username,
-        initiator_id, target_user_id,
+        "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
+        markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
+        markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
         new_initiator_count, new_target_count,
         initiator_rank, target_rank
     );
@@ -501,7 +502,7 @@ async fn process_zw_help_for_user(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("发起者 {} ({})\n仍在冷却：{}分{}秒", initiator_name, initiator_id, mins, secs));
+            cd_messages.push(format!("发起者 {}\n 仍在冷却：{}分{}秒", markdown::user_mention(UserId(initiator_id as u64), initiator_name), mins, secs));
         }
     }
     if let Some(lt) = target_last_time_opt {
@@ -511,7 +512,7 @@ async fn process_zw_help_for_user(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("另一位 {} ({})\n仍在冷却：{}分{}秒", target_username, target_id, mins, secs));
+            cd_messages.push(format!("另一位 {}\n 仍在冷却：{}分{}秒", markdown::user_mention(UserId(target_id as u64), target_username), mins, secs));
         }
     }
 
@@ -519,10 +520,11 @@ async fn process_zw_help_for_user(
         let initiator_rank = get_rank(pool, initiator_id).await.unwrap_or(0);
         let target_rank = get_rank(pool, target_id).await.unwrap_or(0);
         return Ok(format!(
-            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{} ({})\n次数：{}次\n排行榜位置：{}\n\n另一位：{} ({})\n次数：{}次\n排行榜位置：{}\n\n{}",
-            initiator_name,initiator_name,
-            initiator_id, initiator_count, initiator_rank,
-            target_username, target_id, target_count, target_rank,
+            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{}\n次数：{}次\n排行榜位置：{}\n\n另一位：{}\n次数：{}次\n排行榜位置：{}\n\n{}",
+            initiator_name,
+            markdown::user_mention(UserId(initiator_id as u64), initiator_name), initiator_count, initiator_rank,
+            markdown::user_mention(UserId(target_id as u64), target_username),
+            target_count, target_rank,
             cd_messages.join("\n")
         ));
     }
@@ -541,9 +543,9 @@ async fn process_zw_help_for_user(
     let target_rank = get_rank(pool, target_id).await?;
 
     let text = format!(
-        "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
-        initiator_name, target_username,
-        initiator_id, target_id,
+        "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
+        markdown::user_mention(UserId(initiator_id as u64), initiator_name),
+        markdown::user_mention(UserId(target_id as u64), target_username),
         new_initiator_count, new_target_count,
         initiator_rank, target_rank
     );
