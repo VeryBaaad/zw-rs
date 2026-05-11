@@ -207,6 +207,7 @@ async fn handle_zw(
         );
         let _ = bot.send_message(msg.chat.id, text)
             .reply_parameters(ReplyParameters::new(msg.id))
+            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
             .await;
         return Ok(());
     }
@@ -232,6 +233,7 @@ async fn handle_zw(
 
     bot.send_message(msg.chat.id, text)
         .reply_parameters(ReplyParameters::new(msg.id))
+        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
         .await?;
 
     Ok(())
@@ -713,15 +715,15 @@ async fn callback_handler(
                                 log(Level::Debug, "callback_handler", "zw_user: editing q.message");
                                 let chat_id = msg.chat().id;
                                 let message_id = msg.id();
-                                if let Err(e) = bot.edit_message_text(chat_id, message_id, text.clone()).await {
+                                if let Err(e) = bot.edit_message_text(chat_id, message_id, text.clone()).parse_mode(teloxide::types::ParseMode::MarkdownV2).await {
                                     log(Level::Error, "callback_handler", &format!("edit_message_text failed: {}", e));
-                                    if let Err(e2) = bot.send_message(chat_id, text.clone()).await {
+                                    if let Err(e2) = bot.send_message(chat_id, text.clone()).parse_mode(teloxide::types::ParseMode::MarkdownV2).await {
                                         log(Level::Error, "callback_handler", &format!("send_message fallback failed: {}", e2));
                                     }
                                 }
                             } else if let Some(inline_id) = &q.inline_message_id {
                                 log(Level::Debug, "callback_handler", &format!("zw_user: editing inline_message_id {}", inline_id));
-                                if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).await {
+                                if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).parse_mode(teloxide::types::ParseMode::MarkdownV2).await {
                                     log(Level::Error, "callback_handler", &format!("edit_message_text_inline failed: {}", e));
                                 }
                             } else {
