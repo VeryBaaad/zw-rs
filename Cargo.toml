@@ -24,6 +24,7 @@ codegen-units = 1
 panic = 'abort'
 debug = false
 strip = true
+incremental = false
 
 [profile.dev]
 opt-level = 0
