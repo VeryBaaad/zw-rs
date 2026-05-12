@@ -2,12 +2,19 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
-use std::env;
-use teloxide::{prelude::*, types::{InlineKeyboardMarkup, MessageId, ReplyParameters, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent}, utils::command::BotCommands};
-use sqlx::{SqlitePool, Row};
-use chrono::{Utc, Duration};
+use chrono::{Duration, Utc};
 use log::Level;
+use sqlx::{Row, SqlitePool};
+use std::env;
 use teloxide::utils::markdown;
+use teloxide::{
+    prelude::*,
+    types::{
+        InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle,
+        InputMessageContent, MessageId, ReplyParameters,
+    },
+    utils::command::BotCommands,
+};
 
 #[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
@@ -20,14 +27,36 @@ enum Command {
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
-    log(Level::Info, "ZWBotDaemon", format!("Starting zw-rs v{} ({}) (commit {}, built at {}) for {}", env!("CARGO_PKG_VERSION"), env!("VER_CODE"), env!("GIT_HASH"), env!("BUILD_TIME"), env!("BUILD_TARGET")).as_str());
+    log(
+        Level::Info,
+        "ZWBotDaemon",
+        format!(
+            "Starting zw-rs v{} ({}) (commit {}, built at {}) for {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("VER_CODE"),
+            env!("GIT_HASH"),
+            env!("BUILD_TIME"),
+            env!("BUILD_TARGET")
+        )
+        .as_str(),
+    );
 
     let bot = Bot::from_env();
 
     let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:zw.db".to_string());
-    log(Level::Info, "ZWBotDaemon", &format!("Connecting to database: {}", database_url));
-    let pool = SqlitePool::connect(&database_url).await.expect("Failed to connect to database");
-    log(Level::Info, "ZWBotDaemon", "Database connected successfully");
+    log(
+        Level::Info,
+        "ZWBotDaemon",
+        &format!("Connecting to database: {}", database_url),
+    );
+    let pool = SqlitePool::connect(&database_url)
+        .await
+        .expect("Failed to connect to database");
+    log(
+        Level::Info,
+        "ZWBotDaemon",
+        "Database connected successfully",
+    );
 
     // Create table if not exists
     log(Level::Debug, "ZWBotDaemon", "Creating table if not exists");
@@ -38,7 +67,7 @@ async fn main() {
             username TEXT,
             count INTEGER DEFAULT 0,
             last_time DATETIME
-        )"
+        )",
     )
     .execute(&pool)
     .await
@@ -46,7 +75,11 @@ async fn main() {
     log(Level::Info, "ZWBotDaemon", "Table initialization complete");
 
     let handler = dptree::entry()
-        .branch(Update::filter_message().filter_command::<Command>().endpoint(commands_handler))
+        .branch(
+            Update::filter_message()
+                .filter_command::<Command>()
+                .endpoint(commands_handler),
+        )
         .branch(Update::filter_callback_query().endpoint(callback_handler))
         .branch(Update::filter_inline_query().endpoint(inline_query_handler));
 
@@ -64,31 +97,47 @@ async fn commands_handler(
     cmd: Command,
     pool: SqlitePool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    log(Level::Info, "commands_handler", &format!("Received command: {:?}", cmd));
+    log(
+        Level::Info,
+        "commands_handler",
+        &format!("Received command: {:?}", cmd),
+    );
     match cmd {
         Command::Zw(arg) => {
             let arg = arg.trim();
             if arg.is_empty() {
-                log(Level::Debug, "commands_handler", "No argument provided for zw command, treating as empty");
+                log(
+                    Level::Debug,
+                    "commands_handler",
+                    "No argument provided for zw command, treating as empty",
+                );
                 handle_zw(bot, msg, pool, None).await?
             } else {
-                log(Level::Debug, "commands_handler", &format!("Received argument for zw command: '{}'", arg));
+                log(
+                    Level::Debug,
+                    "commands_handler",
+                    &format!("Received argument for zw command: '{}'", arg),
+                );
                 handle_zw(bot, msg, pool, Some(arg.to_string())).await?
             }
-        },
+        }
         Command::Rank(arg) => {
             let page = if arg.is_empty() {
                 0
             } else {
                 arg.trim()
-                .parse::<usize>()
-                .ok()
-                .map(|p| if p > 0 { p - 1 } else { 0 })
-                .unwrap_or(0)
+                    .parse::<usize>()
+                    .ok()
+                    .map(|p| if p > 0 { p - 1 } else { 0 })
+                    .unwrap_or(0)
             };
-            log(Level::Debug, "commands_handler", &format!("Parsed rank page argument: {}", page));
+            log(
+                Level::Debug,
+                "commands_handler",
+                &format!("Parsed rank page argument: {}", page),
+            );
             handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, page).await?;
-        },
+        }
         Command::Version => {
             let version_info = get_version_info().await?;
             bot.send_message(msg.chat.id, version_info).await?;
@@ -115,13 +164,19 @@ async fn handle_zw(
     let cd_duration = Duration::minutes(30);
 
     // find the target user record by id or username
-    async fn find_user_record(pool: &SqlitePool, key: &str) -> Result<Option<(i64, Option<chrono::DateTime<Utc>>, String, i64)>, sqlx::Error> {
+    async fn find_user_record(
+        pool: &SqlitePool,
+        key: &str,
+    ) -> Result<Option<(i64, Option<chrono::DateTime<Utc>>, String, i64)>, sqlx::Error> {
         // try to parse as user_id first
         if let Ok(id) = key.parse::<i64>() {
-            if let Some(row) = sqlx::query("SELECT count, last_time, username, user_id FROM users WHERE user_id = ?")
-                .bind(id)
-                .fetch_optional(pool)
-                .await? {
+            if let Some(row) = sqlx::query(
+                "SELECT count, last_time, username, user_id FROM users WHERE user_id = ?",
+            )
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+            {
                 let count: i64 = row.try_get("count")?;
                 let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
                 let username: String = row.try_get("username")?;
@@ -132,10 +187,13 @@ async fn handle_zw(
         } else {
             // try to parse as username (with optional @)
             let uname = key.trim_start_matches('@');
-            if let Some(row) = sqlx::query("SELECT count, last_time, username, user_id FROM users WHERE username = ?")
-                .bind(uname)
-                .fetch_optional(pool)
-                .await? {
+            if let Some(row) = sqlx::query(
+                "SELECT count, last_time, username, user_id FROM users WHERE username = ?",
+            )
+            .bind(uname)
+            .fetch_optional(pool)
+            .await?
+            {
                 let count: i64 = row.try_get("count")?;
                 let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
                 let username: String = row.try_get("username")?;
@@ -156,12 +214,14 @@ async fn handle_zw(
     let target_record = find_user_record(&pool, &target_key).await?;
     if target_record.is_none() {
         let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
-        let _ = bot.send_message(msg.chat.id, text)
+        let _ = bot
+            .send_message(msg.chat.id, text)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await;
         return Ok(());
     }
-    let (target_count, target_last_time_opt, target_username, target_user_id) = target_record.unwrap();
+    let (target_count, target_last_time_opt, target_username, target_user_id) =
+        target_record.unwrap();
 
     let initiator_row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
         .bind(initiator_id)
@@ -185,7 +245,12 @@ async fn handle_zw(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("发起者 {} 仍在冷却：{}分{}秒", markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()), mins, secs));
+            cd_messages.push(format!(
+                "发起者 {} 仍在冷却：{}分{}秒",
+                markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
+                mins,
+                secs
+            ));
         }
     }
     if let Some(lt) = target_last_time_opt {
@@ -195,7 +260,12 @@ async fn handle_zw(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("另一位 {} 仍在冷却：{}分{}秒", markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()), mins, secs));
+            cd_messages.push(format!(
+                "另一位 {} 仍在冷却：{}分{}秒",
+                markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
+                mins,
+                secs
+            ));
         }
     }
 
@@ -205,12 +275,16 @@ async fn handle_zw(
         let text = format!(
             "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{}\n次数：{}次\n排行榜位置：{}\n\n另一位：{}\n次数：{}次\n排行榜位置：{}\n\n{}",
             initiator_name,
-            markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()), initiator_count, initiator_rank,
+            markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
+            initiator_count,
+            initiator_rank,
             markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
-            target_count, target_rank,
+            target_count,
+            target_rank,
             cd_messages.join("\n")
         );
-        let _ = bot.send_message(msg.chat.id, text)
+        let _ = bot
+            .send_message(msg.chat.id, text)
             .reply_parameters(ReplyParameters::new(msg.id))
             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
             .await;
@@ -221,8 +295,22 @@ async fn handle_zw(
     let new_target_count = target_count + 1;
 
     let mut tx = pool.begin().await?;
-    upsert_user(&mut *tx, initiator_id, initiator_username, new_initiator_count, now).await?;
-    upsert_user(&mut *tx, target_user_id, &target_username, new_target_count, now).await?;
+    upsert_user(
+        &mut *tx,
+        initiator_id,
+        initiator_username,
+        new_initiator_count,
+        now,
+    )
+    .await?;
+    upsert_user(
+        &mut *tx,
+        target_user_id,
+        &target_username,
+        new_target_count,
+        now,
+    )
+    .await?;
     tx.commit().await?;
 
     let initiator_rank = get_rank(&pool, initiator_id).await?;
@@ -232,8 +320,10 @@ async fn handle_zw(
         "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
         markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
         markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
-        new_initiator_count, new_target_count,
-        initiator_rank, target_rank
+        new_initiator_count,
+        new_target_count,
+        initiator_rank,
+        target_rank
     );
 
     bot.send_message(msg.chat.id, text)
@@ -257,59 +347,109 @@ async fn handle_zw_self(
         Some(last_name) => format!("{} {}", user.first_name, last_name),
         None => user.first_name.clone(),
     };
-    log(Level::Info, "handle_zw", &format!("User: {} (ID: {}, Username: {})", name, user_id, username));
+    log(
+        Level::Info,
+        "handle_zw",
+        &format!("User: {} (ID: {}, Username: {})", name, user_id, username),
+    );
 
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
     // Check if user exists
-    log(Level::Debug, "handle_zw", &format!("Querying user {} from database", user_id));
+    log(
+        Level::Debug,
+        "handle_zw",
+        &format!("Querying user {} from database", user_id),
+    );
     let row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
         .bind(user_id)
         .fetch_optional(&pool)
         .await?;
-    log(Level::Debug, "handle_zw", &format!("Query result: user_exists = {}", row.is_some()));
+    log(
+        Level::Debug,
+        "handle_zw",
+        &format!("Query result: user_exists = {}", row.is_some()),
+    );
 
     let (current_count, last_time) = if let Some(row) = row {
         let count: i64 = row.try_get("count")?;
         let last_time: chrono::DateTime<Utc> = row.try_get("last_time")?;
-        log(Level::Debug, "handle_zw", &format!("User exists: count={}, last_time={}", count, last_time));
+        log(
+            Level::Debug,
+            "handle_zw",
+            &format!("User exists: count={}, last_time={}", count, last_time),
+        );
         (count, Some(last_time))
     } else {
-        log(Level::Debug, "handle_zw", "New user, count=0, last_time=None");
+        log(
+            Level::Debug,
+            "handle_zw",
+            "New user, count=0, last_time=None",
+        );
         (0, None)
     };
 
     if let Some(last_time) = last_time {
         let next_time = last_time + cd_duration;
-        log(Level::Debug, "handle_zw", &format!("Checking cooldown: now={}, next_time={}", now, next_time));
+        log(
+            Level::Debug,
+            "handle_zw",
+            &format!("Checking cooldown: now={}, next_time={}", now, next_time),
+        );
         if now < next_time {
-            log(Level::Warn, "handle_zw", &format!("User {} still in cooldown", user_id));
+            log(
+                Level::Warn,
+                "handle_zw",
+                &format!("User {} still in cooldown", user_id),
+            );
             let remaining = next_time - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            log(Level::Debug, "handle_zw", &format!("Remaining cooldown: {}m{}s", mins, secs));
+            log(
+                Level::Debug,
+                "handle_zw",
+                &format!("Remaining cooldown: {}m{}s", mins, secs),
+            );
             let rank = get_rank(&pool, user_id).await?;
             let text = format!(
                 "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n您在自慰排行榜上的位置：{}\n总次数：{}次\n下次可进行自慰的时间：{}分{}秒",
                 name, rank, current_count, mins, secs
             );
-            if let Err(e) = bot.send_message(msg.chat.id, text)
+            if let Err(e) = bot
+                .send_message(msg.chat.id, text)
                 .reply_parameters(ReplyParameters::new(msg.id))
-                .await {
-                log(Level::Error, "handle_zw", &format!("Failed to send cooldown message: {}", e));
+                .await
+            {
+                log(
+                    Level::Error,
+                    "handle_zw",
+                    &format!("Failed to send cooldown message: {}", e),
+                );
                 return Err(Box::new(e));
             }
             return Ok(());
         }
-        log(Level::Debug, "handle_zw", "Cooldown period expired, proceeding");
+        log(
+            Level::Debug,
+            "handle_zw",
+            "Cooldown period expired, proceeding",
+        );
     } else {
-        log(Level::Debug, "handle_zw", "No previous record, first time user");
+        log(
+            Level::Debug,
+            "handle_zw",
+            "No previous record, first time user",
+        );
     }
 
     // Update count and last_time
     let new_count = current_count + 1;
-    log(Level::Info, "handle_zw", &format!("Updating user count: {} -> {}", current_count, new_count));
+    log(
+        Level::Info,
+        "handle_zw",
+        &format!("Updating user count: {} -> {}", current_count, new_count),
+    );
     upsert_user(&pool, user_id, username, new_count, now).await?;
 
     let rank = get_rank(&pool, user_id).await?;
@@ -317,13 +457,26 @@ async fn handle_zw_self(
         "已开始自慰！\n\n您在自慰排行榜上的位置：{}\n总次数：{}次\n下次可进行自慰的时间：30分0秒",
         rank, new_count
     );
-    if let Err(e) = bot.send_message(msg.chat.id, text)
+    if let Err(e) = bot
+        .send_message(msg.chat.id, text)
         .reply_parameters(ReplyParameters::new(msg.id))
-        .await {
-        log(Level::Error, "handle_zw", &format!("Failed to send success message: {}", e));
+        .await
+    {
+        log(
+            Level::Error,
+            "handle_zw",
+            &format!("Failed to send success message: {}", e),
+        );
         return Err(Box::new(e));
     }
-    log(Level::Info, "handle_zw", &format!("User {} completed action, new count: {}", user_id, new_count));
+    log(
+        Level::Info,
+        "handle_zw",
+        &format!(
+            "User {} completed action, new count: {}",
+            user_id, new_count
+        ),
+    );
     Ok(())
 }
 
@@ -335,7 +488,11 @@ async fn handle_rank(
     pool: SqlitePool,
     page: usize,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    log(Level::Info, "handle_rank", &format!("Handling rank command: page={}", page));
+    log(
+        Level::Info,
+        "handle_rank",
+        &format!("Handling rank command: page={}", page),
+    );
     let per_page: i64 = 10;
 
     log(Level::Debug, "handle_rank", "Querying total user count");
@@ -343,7 +500,11 @@ async fn handle_rank(
         .fetch_one(&pool)
         .await?
         .try_get::<i64, _>("count")? as usize;
-    log(Level::Debug, "handle_rank", &format!("Total users in database: {}", total));
+    log(
+        Level::Debug,
+        "handle_rank",
+        &format!("Total users in database: {}", total),
+    );
 
     let max_page_index = if total > 0 {
         ((total as f64 / per_page as f64).ceil() as usize) - 1
@@ -353,7 +514,14 @@ async fn handle_rank(
 
     let valid_page = if page <= max_page_index { page } else { 0 };
     let offset: i64 = (valid_page as i64) * per_page;
-    log(Level::Debug, "handle_rank", &format!("Fetching rankings: per_page={}, offset={}", per_page, offset));
+    log(
+        Level::Debug,
+        "handle_rank",
+        &format!(
+            "Fetching rankings: per_page={}, offset={}",
+            per_page, offset
+        ),
+    );
 
     log(Level::Debug, "handle_rank", "Querying users from database");
     let rows = sqlx::query(
@@ -363,7 +531,11 @@ async fn handle_rank(
     .bind(offset)
     .fetch_all(&pool)
     .await?;
-    log(Level::Debug, "handle_rank", &format!("Retrieved {} users from database", rows.len()));
+    log(
+        Level::Debug,
+        "handle_rank",
+        &format!("Retrieved {} users from database", rows.len()),
+    );
 
     let mut text = "自慰排行榜\n\n".to_string();
     for (i, row) in rows.iter().enumerate() {
@@ -371,16 +543,25 @@ async fn handle_rank(
         let username: String = row.try_get("username")?;
         let count: i64 = row.try_get("count")?;
         let user_id: i64 = row.try_get("user_id")?;
-        text.push_str(&format!("{}. {}: {}次\n{}\n", rank, username, count, user_id));
+        text.push_str(&format!(
+            "{}. {}: {}次\n{}\n",
+            rank, username, count, user_id
+        ));
     }
 
     let mut keyboard = InlineKeyboardMarkup::default();
     let mut row = Vec::new();
     if valid_page > 0 {
-        row.push(teloxide::types::InlineKeyboardButton::callback("上一页", format!("rank_{}", valid_page - 1)));
+        row.push(teloxide::types::InlineKeyboardButton::callback(
+            "上一页",
+            format!("rank_{}", valid_page - 1),
+        ));
     }
     if (valid_page + 1) * (per_page as usize) < total {
-        row.push(teloxide::types::InlineKeyboardButton::callback("下一页", format!("rank_{}", valid_page + 1)));
+        row.push(teloxide::types::InlineKeyboardButton::callback(
+            "下一页",
+            format!("rank_{}", valid_page + 1),
+        ));
     }
     if !row.is_empty() {
         keyboard.inline_keyboard.push(row);
@@ -388,10 +569,16 @@ async fn handle_rank(
 
     if let Some(message_id) = message_id {
         log(Level::Debug, "handle_rank", "Editing existing rank message");
-        if let Err(e) = bot.edit_message_text(chat_id, message_id, text)
+        if let Err(e) = bot
+            .edit_message_text(chat_id, message_id, text)
             .reply_markup(keyboard)
-            .await {
-            log(Level::Error, "handle_rank", &format!("Failed to edit rank message: {}", e));
+            .await
+        {
+            log(
+                Level::Error,
+                "handle_rank",
+                &format!("Failed to edit rank message: {}", e),
+            );
             return Err(Box::new(e));
         }
     } else {
@@ -401,11 +588,19 @@ async fn handle_rank(
             req = req.reply_parameters(ReplyParameters::new(reply_id));
         }
         if let Err(e) = req.await {
-            log(Level::Error, "handle_rank", &format!("Failed to send rank message: {}", e));
+            log(
+                Level::Error,
+                "handle_rank",
+                &format!("Failed to send rank message: {}", e),
+            );
             return Err(Box::new(e));
         }
     }
-    log(Level::Debug, "handle_rank", "Rank message sent successfully");
+    log(
+        Level::Debug,
+        "handle_rank",
+        "Rank message sent successfully",
+    );
     Ok(())
 }
 
@@ -415,7 +610,11 @@ async fn process_zw_for_user(
     username: &str,
     display_name: &str,
 ) -> Result<(String, i64), Box<dyn std::error::Error + Send + Sync>> {
-    log(Level::Debug, "process_zw_for_user", &format!("Processing zw for user {} ({})", display_name, user_id));
+    log(
+        Level::Debug,
+        "process_zw_for_user",
+        &format!("Processing zw for user {} ({})", display_name, user_id),
+    );
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
@@ -468,7 +667,14 @@ async fn process_zw_help_for_user(
     target_id: i64,
     target_username: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    log(Level::Debug, "process_zw_help_for_user", &format!("Processing zw help: {} helping {}", initiator_name, target_username));
+    log(
+        Level::Debug,
+        "process_zw_help_for_user",
+        &format!(
+            "Processing zw help: {} helping {}",
+            initiator_name, target_username
+        ),
+    );
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
@@ -509,7 +715,12 @@ async fn process_zw_help_for_user(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("发起者 {} 仍在冷却：{}分{}秒", markdown::user_mention(UserId(initiator_id as u64), initiator_name), mins, secs));
+            cd_messages.push(format!(
+                "发起者 {} 仍在冷却：{}分{}秒",
+                markdown::user_mention(UserId(initiator_id as u64), initiator_name),
+                mins,
+                secs
+            ));
         }
     }
     if let Some(lt) = target_last_time_opt {
@@ -519,7 +730,12 @@ async fn process_zw_help_for_user(
             let remaining = next - now;
             let mins = remaining.num_minutes();
             let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!("另一位 {} 仍在冷却：{}分{}秒", markdown::user_mention(UserId(target_id as u64), target_username), mins, secs));
+            cd_messages.push(format!(
+                "另一位 {} 仍在冷却：{}分{}秒",
+                markdown::user_mention(UserId(target_id as u64), target_username),
+                mins,
+                secs
+            ));
         }
     }
 
@@ -529,9 +745,12 @@ async fn process_zw_help_for_user(
         return Ok(format!(
             "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{}\n次数：{}次\n排行榜位置：{}\n\n另一位：{}\n次数：{}次\n排行榜位置：{}\n\n{}",
             initiator_name,
-            markdown::user_mention(UserId(initiator_id as u64), initiator_name), initiator_count, initiator_rank,
+            markdown::user_mention(UserId(initiator_id as u64), initiator_name),
+            initiator_count,
+            initiator_rank,
             markdown::user_mention(UserId(target_id as u64), target_username),
-            target_count, target_rank,
+            target_count,
+            target_rank,
             cd_messages.join("\n")
         ));
     }
@@ -541,7 +760,14 @@ async fn process_zw_help_for_user(
     let new_target_count = target_count + 1;
 
     let mut tx = pool.begin().await?;
-    upsert_user(&mut *tx, initiator_id, initiator_username, new_initiator_count, now).await?;
+    upsert_user(
+        &mut *tx,
+        initiator_id,
+        initiator_username,
+        new_initiator_count,
+        now,
+    )
+    .await?;
     upsert_user(&mut *tx, target_id, target_username, new_target_count, now).await?;
 
     tx.commit().await?;
@@ -553,8 +779,10 @@ async fn process_zw_help_for_user(
         "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
         markdown::user_mention(UserId(initiator_id as u64), initiator_name),
         markdown::user_mention(UserId(target_id as u64), target_username),
-        new_initiator_count, new_target_count,
-        initiator_rank, target_rank
+        new_initiator_count,
+        new_target_count,
+        initiator_rank,
+        target_rank
     );
 
     Ok(text)
@@ -566,26 +794,57 @@ async fn callback_handler(
     pool: SqlitePool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(data) = &q.data {
-        log(Level::Debug, "callback_handler", &format!("Received callback data: {}", data));
+        log(
+            Level::Debug,
+            "callback_handler",
+            &format!("Received callback data: {}", data),
+        );
 
         // rank pagination
         if let Some(stripped) = data.strip_prefix("rank_") {
             let page: usize = stripped.parse().unwrap_or(0);
-            log(Level::Debug, "callback_handler", &format!("rank callback page: {}", page));
+            log(
+                Level::Debug,
+                "callback_handler",
+                &format!("rank callback page: {}", page),
+            );
 
             if let Some(msg) = &q.message {
                 let chat_id = msg.chat().id;
                 let message_id = msg.id();
-                if let Err(e) = handle_rank(bot.clone(), chat_id, Some(message_id), None, pool.clone(), page).await {
-                    log(Level::Error, "callback_handler", &format!("handle_rank failed: {}", e));
+                if let Err(e) = handle_rank(
+                    bot.clone(),
+                    chat_id,
+                    Some(message_id),
+                    None,
+                    pool.clone(),
+                    page,
+                )
+                .await
+                {
+                    log(
+                        Level::Error,
+                        "callback_handler",
+                        &format!("handle_rank failed: {}", e),
+                    );
                 }
             } else if let Some(inline_id) = &q.inline_message_id {
-                log(Level::Debug, "callback_handler", &format!("rank callback editing inline_message_id {}", inline_id));
-                
+                log(
+                    Level::Debug,
+                    "callback_handler",
+                    &format!("rank callback editing inline_message_id {}", inline_id),
+                );
+
                 let per_page: i64 = 10;
                 let total = sqlx::query("SELECT COUNT(*) as count FROM users")
-                    .fetch_one(&pool).await?.try_get::<i64, _>("count")? as usize;
-                let max_page_index = if total > 0 { ((total as f64 / per_page as f64).ceil() as usize) - 1 } else { 0 };
+                    .fetch_one(&pool)
+                    .await?
+                    .try_get::<i64, _>("count")? as usize;
+                let max_page_index = if total > 0 {
+                    ((total as f64 / per_page as f64).ceil() as usize) - 1
+                } else {
+                    0
+                };
                 let valid_page = if page <= max_page_index { page } else { 0 };
                 let offset: i64 = (valid_page as i64) * per_page;
 
@@ -598,24 +857,47 @@ async fn callback_handler(
                     let username: String = row.try_get("username")?;
                     let count: i64 = row.try_get("count")?;
                     let user_id: i64 = row.try_get("user_id")?;
-                    text.push_str(&format!("{}. {}: {}次\n{}\n", rank, username, count, user_id));
+                    text.push_str(&format!(
+                        "{}. {}: {}次\n{}\n",
+                        rank, username, count, user_id
+                    ));
                 }
 
                 let mut keyboard = InlineKeyboardMarkup::default();
                 let mut row = Vec::new();
                 if valid_page > 0 {
-                    row.push(teloxide::types::InlineKeyboardButton::callback("上一页", format!("rank_{}", valid_page - 1)));
+                    row.push(teloxide::types::InlineKeyboardButton::callback(
+                        "上一页",
+                        format!("rank_{}", valid_page - 1),
+                    ));
                 }
                 if (valid_page + 1) * (per_page as usize) < total {
-                    row.push(teloxide::types::InlineKeyboardButton::callback("下一页", format!("rank_{}", valid_page + 1)));
+                    row.push(teloxide::types::InlineKeyboardButton::callback(
+                        "下一页",
+                        format!("rank_{}", valid_page + 1),
+                    ));
                 }
-                if !row.is_empty() { keyboard.inline_keyboard.push(row); }
+                if !row.is_empty() {
+                    keyboard.inline_keyboard.push(row);
+                }
 
-                if let Err(e) = bot.edit_message_text_inline(inline_id.as_str(), text).reply_markup(keyboard).await {
-                    log(Level::Error, "callback_handler", &format!("edit_message_text_inline failed: {}", e));
+                if let Err(e) = bot
+                    .edit_message_text_inline(inline_id.as_str(), text)
+                    .reply_markup(keyboard)
+                    .await
+                {
+                    log(
+                        Level::Error,
+                        "callback_handler",
+                        &format!("edit_message_text_inline failed: {}", e),
+                    );
                 }
             } else {
-                log(Level::Warn, "callback_handler", "rank_ callback received but q.message and q.inline_message_id are None");
+                log(
+                    Level::Warn,
+                    "callback_handler",
+                    "rank_ callback received but q.message and q.inline_message_id are None",
+                );
             }
             let _ = bot.answer_callback_query(q.id).await;
             return Ok(());
@@ -626,7 +908,11 @@ async fn callback_handler(
             let expected_initiator_id = match stripped.parse::<i64>() {
                 Ok(id) => id,
                 Err(_) => {
-                    log(Level::Warn, "callback_handler", &format!("Invalid zw_self callback data: {}", data));
+                    log(
+                        Level::Warn,
+                        "callback_handler",
+                        &format!("Invalid zw_self callback data: {}", data),
+                    );
                     let _ = bot.answer_callback_query(q.id).await;
                     return Ok(());
                 }
@@ -634,8 +920,19 @@ async fn callback_handler(
 
             let actual_initiator_id = q.from.id.0 as i64;
             if actual_initiator_id != expected_initiator_id {
-                log(Level::Warn, "callback_handler", &format!("Permission denied: {} tried to click zw_self initiated by {}", actual_initiator_id, expected_initiator_id));
-                let _ = bot.answer_callback_query(q.id).show_alert(true).text("只有发起人可以点击此按钮").await;
+                log(
+                    Level::Warn,
+                    "callback_handler",
+                    &format!(
+                        "Permission denied: {} tried to click zw_self initiated by {}",
+                        actual_initiator_id, expected_initiator_id
+                    ),
+                );
+                let _ = bot
+                    .answer_callback_query(q.id)
+                    .show_alert(true)
+                    .text("只有发起人可以点击此按钮")
+                    .await;
                 return Ok(());
             }
 
@@ -650,33 +947,73 @@ async fn callback_handler(
             match process_zw_for_user(&pool, user_id, username, &display_name).await {
                 Ok((text, _)) => {
                     if let Some(msg) = &q.message {
-                        log(Level::Debug, "callback_handler", "zw_self: editing q.message");
+                        log(
+                            Level::Debug,
+                            "callback_handler",
+                            "zw_self: editing q.message",
+                        );
                         let chat_id = msg.chat().id;
                         let message_id = msg.id();
-                        if let Err(e) = bot.edit_message_text(chat_id, message_id, text.clone()).await {
-                            log(Level::Error, "callback_handler", &format!("edit_message_text failed: {}", e));
+                        if let Err(e) = bot
+                            .edit_message_text(chat_id, message_id, text.clone())
+                            .await
+                        {
+                            log(
+                                Level::Error,
+                                "callback_handler",
+                                &format!("edit_message_text failed: {}", e),
+                            );
                             if let Err(e2) = bot.send_message(chat_id, text.clone()).await {
-                                log(Level::Error, "callback_handler", &format!("send_message fallback failed: {}", e2));
+                                log(
+                                    Level::Error,
+                                    "callback_handler",
+                                    &format!("send_message fallback failed: {}", e2),
+                                );
                             }
                         }
                     } else if let Some(inline_id) = &q.inline_message_id {
-                        log(Level::Debug, "callback_handler", &format!("zw_self: editing inline_message_id {}", inline_id));
-                        if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).await {
-                            log(Level::Error, "callback_handler", &format!("edit_message_text_inline failed: {}", e));
+                        log(
+                            Level::Debug,
+                            "callback_handler",
+                            &format!("zw_self: editing inline_message_id {}", inline_id),
+                        );
+                        if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).await
+                        {
+                            log(
+                                Level::Error,
+                                "callback_handler",
+                                &format!("edit_message_text_inline failed: {}", e),
+                            );
                         }
                     } else {
-                        log(Level::Warn, "callback_handler", "zw_self: no q.message and no inline_message_id, sending DM");
+                        log(
+                            Level::Warn,
+                            "callback_handler",
+                            "zw_self: no q.message and no inline_message_id, sending DM",
+                        );
                         if let Err(e) = bot.send_message(ChatId(user_id), text.clone()).await {
-                            log(Level::Error, "callback_handler", &format!("send DM failed: {}", e));
+                            log(
+                                Level::Error,
+                                "callback_handler",
+                                &format!("send DM failed: {}", e),
+                            );
                         }
                     }
                 }
                 Err(e) => {
-                    log(Level::Error, "callback_handler", &format!("process_zw_for_user failed: {}", e));
+                    log(
+                        Level::Error,
+                        "callback_handler",
+                        &format!("process_zw_for_user failed: {}", e),
+                    );
                     if let Some(msg) = &q.message {
-                        let _ = bot.send_message(msg.chat().id, "发生错误，请稍后重试").await;
+                        let _ = bot
+                            .send_message(msg.chat().id, "发生错误，请稍后重试")
+                            .await;
                     } else {
-                        let _ = bot.send_message(ChatId(user_id), "发生错误，请稍后重试").await;
+                        let _ = bot
+                            .send_message(ChatId(user_id), "发生错误，请稍后重试")
+                            .await;
                     }
                 }
             }
@@ -685,74 +1022,160 @@ async fn callback_handler(
         }
 
         if let Some(stripped) = data.strip_prefix("zw_user_") {
-            log(Level::Debug, "callback_handler", &format!("zw_user callback: {}", data));
+            log(
+                Level::Debug,
+                "callback_handler",
+                &format!("zw_user callback: {}", data),
+            );
             // Parse target_id_initiator_id format
             let parts: Vec<&str> = stripped.split('_').collect();
             if parts.len() == 2 {
-                if let (Ok(target_id), Ok(expected_initiator_id)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                if let (Ok(target_id), Ok(expected_initiator_id)) =
+                    (parts[0].parse::<i64>(), parts[1].parse::<i64>())
+                {
                     let from = &q.from;
                     let actual_initiator_id = from.id.0 as i64;
-                    
+
                     // Check permission: only allow the query initiator
                     if actual_initiator_id != expected_initiator_id {
-                        log(Level::Warn, "callback_handler", &format!("Permission denied: {} tried to use button initiated by {}", actual_initiator_id, expected_initiator_id));
-                        let _ = bot.answer_callback_query(q.id).show_alert(true).text("只有发起人可以点击此按钮").await;
+                        log(
+                            Level::Warn,
+                            "callback_handler",
+                            &format!(
+                                "Permission denied: {} tried to use button initiated by {}",
+                                actual_initiator_id, expected_initiator_id
+                            ),
+                        );
+                        let _ = bot
+                            .answer_callback_query(q.id)
+                            .show_alert(true)
+                            .text("只有发起人可以点击此按钮")
+                            .await;
                         return Ok(());
                     }
-                    
+
                     let initiator_username = from.username.as_deref().unwrap_or("未知用户");
                     let initiator_name = match from.last_name.as_deref() {
                         Some(last) => format!("{} {}", from.first_name.clone(), last),
                         None => from.first_name.clone(),
                     };
 
-                    let target_username = match sqlx::query("SELECT username FROM users WHERE user_id = ?")
-                        .bind(target_id)
-                        .fetch_optional(&pool)
-                        .await {
-                            Ok(Some(row)) => row.try_get::<String, _>("username").unwrap_or_else(|_| "User".to_string()),
+                    let target_username =
+                        match sqlx::query("SELECT username FROM users WHERE user_id = ?")
+                            .bind(target_id)
+                            .fetch_optional(&pool)
+                            .await
+                        {
+                            Ok(Some(row)) => row
+                                .try_get::<String, _>("username")
+                                .unwrap_or_else(|_| "User".to_string()),
                             _ => "User".to_string(),
                         };
 
-                    match process_zw_help_for_user(&pool, actual_initiator_id, initiator_username, &initiator_name, target_id, &target_username).await {
+                    match process_zw_help_for_user(
+                        &pool,
+                        actual_initiator_id,
+                        initiator_username,
+                        &initiator_name,
+                        target_id,
+                        &target_username,
+                    )
+                    .await
+                    {
                         Ok(text) => {
                             if let Some(msg) = &q.message {
-                                log(Level::Debug, "callback_handler", "zw_user: editing q.message");
+                                log(
+                                    Level::Debug,
+                                    "callback_handler",
+                                    "zw_user: editing q.message",
+                                );
                                 let chat_id = msg.chat().id;
                                 let message_id = msg.id();
-                                if let Err(e) = bot.edit_message_text(chat_id, message_id, text.clone()).parse_mode(teloxide::types::ParseMode::MarkdownV2).await {
-                                    log(Level::Error, "callback_handler", &format!("edit_message_text failed: {}", e));
-                                    if let Err(e2) = bot.send_message(chat_id, text.clone()).parse_mode(teloxide::types::ParseMode::MarkdownV2).await {
-                                        log(Level::Error, "callback_handler", &format!("send_message fallback failed: {}", e2));
+                                if let Err(e) = bot
+                                    .edit_message_text(chat_id, message_id, text.clone())
+                                    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                    .await
+                                {
+                                    log(
+                                        Level::Error,
+                                        "callback_handler",
+                                        &format!("edit_message_text failed: {}", e),
+                                    );
+                                    if let Err(e2) = bot
+                                        .send_message(chat_id, text.clone())
+                                        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                        .await
+                                    {
+                                        log(
+                                            Level::Error,
+                                            "callback_handler",
+                                            &format!("send_message fallback failed: {}", e2),
+                                        );
                                     }
                                 }
                             } else if let Some(inline_id) = &q.inline_message_id {
-                                log(Level::Debug, "callback_handler", &format!("zw_user: editing inline_message_id {}", inline_id));
-                                if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).parse_mode(teloxide::types::ParseMode::MarkdownV2).await {
-                                    log(Level::Error, "callback_handler", &format!("edit_message_text_inline failed: {}", e));
+                                log(
+                                    Level::Debug,
+                                    "callback_handler",
+                                    &format!("zw_user: editing inline_message_id {}", inline_id),
+                                );
+                                if let Err(e) = bot
+                                    .edit_message_text_inline(inline_id, text.clone())
+                                    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                    .await
+                                {
+                                    log(
+                                        Level::Error,
+                                        "callback_handler",
+                                        &format!("edit_message_text_inline failed: {}", e),
+                                    );
                                 }
                             } else {
-                                log(Level::Warn, "callback_handler", "zw_user callback but q.message and inline_message_id are None");
+                                log(
+                                    Level::Warn,
+                                    "callback_handler",
+                                    "zw_user callback but q.message and inline_message_id are None",
+                                );
                             }
                         }
                         Err(e) => {
-                            log(Level::Error, "callback_handler", &format!("process_zw_help_for_user failed: {}", e));
+                            log(
+                                Level::Error,
+                                "callback_handler",
+                                &format!("process_zw_help_for_user failed: {}", e),
+                            );
                         }
                     }
                 } else {
-                    log(Level::Warn, "callback_handler", &format!("Invalid zw_user format in callback: {}", data));
+                    log(
+                        Level::Warn,
+                        "callback_handler",
+                        &format!("Invalid zw_user format in callback: {}", data),
+                    );
                 }
             } else {
-                log(Level::Warn, "callback_handler", &format!("Invalid zw_user format in callback: {}", data));
+                log(
+                    Level::Warn,
+                    "callback_handler",
+                    &format!("Invalid zw_user format in callback: {}", data),
+                );
             }
             let _ = bot.answer_callback_query(q.id).await;
             return Ok(());
         }
 
-        log(Level::Warn, "callback_handler", &format!("Unhandled callback data: {}", data));
+        log(
+            Level::Warn,
+            "callback_handler",
+            &format!("Unhandled callback data: {}", data),
+        );
         let _ = bot.answer_callback_query(q.id).await;
     } else {
-        log(Level::Debug, "callback_handler", "CallbackQuery has no data");
+        log(
+            Level::Debug,
+            "callback_handler",
+            "CallbackQuery has no data",
+        );
     }
     Ok(())
 }
@@ -762,7 +1185,11 @@ async fn inline_query_handler(
     q: InlineQuery,
     pool: SqlitePool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    log(Level::Debug, "inline_query_handler", &format!("Received inline query: '{}'", q.query));
+    log(
+        Level::Debug,
+        "inline_query_handler",
+        &format!("Received inline query: '{}'", q.query),
+    );
     let query = q.query.trim();
     let mut results: Vec<InlineQueryResult> = Vec::new();
 
@@ -779,7 +1206,7 @@ async fn inline_query_handler(
             .bind(offset)
             .fetch_all(&pool)
             .await?;
-            
+
             let mut text = "自慰排行榜\n\n".to_string();
             for (i, row) in rows.iter().enumerate() {
                 let rank = (i as i64 + 1) as usize;
@@ -801,9 +1228,12 @@ async fn inline_query_handler(
     let initiator_id = q.from.id.0 as i64;
     let zw_text = "点击下方按钮进行紫薇\n直接爽4！";
     let mut zw_kb = InlineKeyboardMarkup::default();
-    zw_kb.inline_keyboard.push(vec![
-        teloxide::types::InlineKeyboardButton::callback("自慰", format!("zw_self_{}", initiator_id)),
-    ]);
+    zw_kb
+        .inline_keyboard
+        .push(vec![teloxide::types::InlineKeyboardButton::callback(
+            "自慰",
+            format!("zw_self_{}", initiator_id),
+        )]);
     let zw_article = InlineQueryResultArticle::new(
         format!("zw_{}", chrono::Utc::now().timestamp_millis()),
         "自慰",
@@ -821,7 +1251,11 @@ async fn inline_query_handler(
     let rank_keyboard = match get_rank_keyboard(&pool, 0).await {
         Ok(k) => k,
         Err(e) => {
-            log(Level::Error, "inline_query_handler", &format!("get_rank_keyboard error: {}", e));
+            log(
+                Level::Error,
+                "inline_query_handler",
+                &format!("get_rank_keyboard error: {}", e),
+            );
             InlineKeyboardMarkup::default()
         }
     };
@@ -837,7 +1271,15 @@ async fn inline_query_handler(
     )
     .description("谁更多")
     .reply_markup(rank_keyboard);
-    log(Level::Debug, "inline_query_handler", &format!("Answering inline query: results={}, rank_kb_rows={}", results.len(), 0));
+    log(
+        Level::Debug,
+        "inline_query_handler",
+        &format!(
+            "Answering inline query: results={}, rank_kb_rows={}",
+            results.len(),
+            0
+        ),
+    );
     results.push(InlineQueryResult::Article(rank_article));
 
     let version_info = get_version_info().await?;
@@ -859,9 +1301,11 @@ async fn inline_query_handler(
             if user_exists(&pool, user_id).await? {
                 let initiator_id = q.from.id.0 as i64;
                 let mut kb = InlineKeyboardMarkup::default();
-                kb.inline_keyboard.push(vec![
-                    teloxide::types::InlineKeyboardButton::callback("自慰 (目标)", format!("zw_user_{}_{}", user_id, initiator_id)),
-                ]);
+                kb.inline_keyboard
+                    .push(vec![teloxide::types::InlineKeyboardButton::callback(
+                        "自慰 (目标)",
+                        format!("zw_user_{}_{}", user_id, initiator_id),
+                    )]);
                 let art = InlineQueryResultArticle::new(
                     format!("zw_user_{}_{}", user_id, initiator_id),
                     format!("自慰 {}", user_id),
@@ -878,12 +1322,20 @@ async fn inline_query_handler(
         } else if let Ok(page) = query.parse::<usize>() {
             let per_page: i64 = 10;
             let total = get_total_users(&pool).await? as usize;
-            let max_page_index = if total > 0 { ((total as f64 / per_page as f64).ceil() as usize) - 1 } else { 0 };
+            let max_page_index = if total > 0 {
+                ((total as f64 / per_page as f64).ceil() as usize) - 1
+            } else {
+                0
+            };
             let valid_page = if page <= max_page_index { page } else { 0 };
             let rk = match get_rank_keyboard(&pool, valid_page).await {
                 Ok(k) => k,
                 Err(e) => {
-                    log(Level::Error, "inline_query_handler", &format!("get_rank_keyboard error: {}", e));
+                    log(
+                        Level::Error,
+                        "inline_query_handler",
+                        &format!("get_rank_keyboard error: {}", e),
+                    );
                     InlineKeyboardMarkup::default()
                 }
             };
@@ -902,48 +1354,70 @@ async fn inline_query_handler(
         }
     }
 
-    if let Err(e) = bot.answer_inline_query(q.id, results)
+    if let Err(e) = bot
+        .answer_inline_query(q.id, results)
         .is_personal(true)
         .cache_time(0)
-        .await {
-        log(Level::Error, "inline_query_handler", &format!("Failed to answer inline query: {}", e));
+        .await
+    {
+        log(
+            Level::Error,
+            "inline_query_handler",
+            &format!("Failed to answer inline query: {}", e),
+        );
     }
     Ok(())
 }
 
 async fn upsert_user<'a, E>(
-    pool: E, 
-    user_id: i64, 
-    username: &str, 
-    new_count: i64, 
-    now: chrono::DateTime<Utc>
-) -> Result<(), sqlx::Error> 
-where 
+    pool: E,
+    user_id: i64,
+    username: &str,
+    new_count: i64,
+    now: chrono::DateTime<Utc>,
+) -> Result<(), sqlx::Error>
+where
     E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
 {
-    log(Level::Debug, "handle_zw", "Inserting/updating user in database");
+    log(
+        Level::Debug,
+        "handle_zw",
+        "Inserting/updating user in database",
+    );
     if let Err(e) = sqlx::query(
         "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET
          username = excluded.username,
          count = excluded.count,
-         last_time = excluded.last_time"
+         last_time = excluded.last_time",
     )
     .bind(user_id)
     .bind(username)
     .bind(new_count)
     .bind(now)
     .execute(pool)
-    .await {
-        log(Level::Error, "handle_zw", &format!("Failed to update user in database: {}", e));
+    .await
+    {
+        log(
+            Level::Error,
+            "handle_zw",
+            &format!("Failed to update user in database: {}", e),
+        );
         return Err(e);
     }
     log(Level::Debug, "handle_zw", "Database update successful");
     Ok(())
 }
 
-async fn user_exists(pool: &SqlitePool, user_id: i64) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    log(Level::Debug, "user_exists", &format!("Checking if user {} exists", user_id));
+async fn user_exists(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    log(
+        Level::Debug,
+        "user_exists",
+        &format!("Checking if user {} exists", user_id),
+    );
     let row = sqlx::query("SELECT user_id FROM users WHERE user_id = ?")
         .bind(user_id)
         .fetch_optional(pool)
@@ -951,7 +1425,9 @@ async fn user_exists(pool: &SqlitePool, user_id: i64) -> Result<bool, Box<dyn st
     Ok(row.is_some())
 }
 
-async fn get_total_users(pool: &SqlitePool) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+async fn get_total_users(
+    pool: &SqlitePool,
+) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
     log(Level::Debug, "get_total_users", "Fetching total user count");
     let row = sqlx::query("SELECT COUNT(*) as count FROM users")
         .fetch_one(pool)
@@ -964,38 +1440,55 @@ async fn get_rank_keyboard(
     pool: &SqlitePool,
     page: usize,
 ) -> Result<InlineKeyboardMarkup, Box<dyn std::error::Error + Send + Sync>> {
-    log(Level::Debug, "get_rank_keyboard", &format!("Generating rank keyboard for page {}", page));
-    
+    log(
+        Level::Debug,
+        "get_rank_keyboard",
+        &format!("Generating rank keyboard for page {}", page),
+    );
+
     let per_page: i64 = 10;
     let total = get_total_users(pool).await? as usize;
-    
+
     let max_page_index = if total > 0 {
         ((total as f64 / per_page as f64).ceil() as usize) - 1
     } else {
         0
     };
-    
+
     let valid_page = if page <= max_page_index { page } else { 0 };
-    
+
     let mut keyboard = InlineKeyboardMarkup::default();
     let mut row = Vec::new();
-    
+
     if valid_page > 0 {
-        row.push(teloxide::types::InlineKeyboardButton::callback("上一页", format!("rank_{}", valid_page - 1)));
+        row.push(teloxide::types::InlineKeyboardButton::callback(
+            "上一页",
+            format!("rank_{}", valid_page - 1),
+        ));
     }
     if (valid_page + 1) * (per_page as usize) < total {
-        row.push(teloxide::types::InlineKeyboardButton::callback("下一页", format!("rank_{}", valid_page + 1)));
+        row.push(teloxide::types::InlineKeyboardButton::callback(
+            "下一页",
+            format!("rank_{}", valid_page + 1),
+        ));
     }
-    
+
     if !row.is_empty() {
         keyboard.inline_keyboard.push(row);
     }
-    
+
     Ok(keyboard)
 }
 
-async fn get_rank(pool: &SqlitePool, user_id: i64) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-    log(Level::Debug, "get_rank", &format!("Calculating rank for user: {}", user_id));
+async fn get_rank(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    log(
+        Level::Debug,
+        "get_rank",
+        &format!("Calculating rank for user: {}", user_id),
+    );
     let row = match sqlx::query(
         "SELECT COUNT(*) as rank FROM users WHERE count > (SELECT count FROM users WHERE user_id = ?) OR (count = (SELECT count FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
     )
@@ -1012,22 +1505,27 @@ async fn get_rank(pool: &SqlitePool, user_id: i64) -> Result<usize, Box<dyn std:
     };
     let rank: i64 = row.try_get("rank")?;
     let final_rank = (rank + 1) as usize;
-    log(Level::Debug, "get_rank", &format!("User {} rank: {}", user_id, final_rank));
+    log(
+        Level::Debug,
+        "get_rank",
+        &format!("User {} rank: {}", user_id, final_rank),
+    );
     Ok(final_rank)
 }
 
 async fn get_version_info() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     Ok(format!(
-"{} v{} ({})\n\
+        "{} v{} ({})\n\
 Commit {}\n\
 Built at {}\n\
 Target {}",
-    env!("CARGO_PKG_NAME"),
-    env!("CARGO_PKG_VERSION"),
-    env!("VER_CODE"),
-    env!("GIT_HASH"),
-    env!("BUILD_TIME"),
-    env!("BUILD_TARGET")))
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        env!("VER_CODE"),
+        env!("GIT_HASH"),
+        env!("BUILD_TIME"),
+        env!("BUILD_TARGET")
+    ))
 }
 
 fn log(priority: Level, tag: &str, msg: &str) {
@@ -1041,7 +1539,13 @@ fn log(priority: Level, tag: &str, msg: &str) {
         Level::Debug => "D",
         _ => "N",
     };
-    let output: String = format!("[ {} {}/{} ] {}", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"), shortlevel, tag, msg);
+    let output: String = format!(
+        "[ {} {}/{} ] {}",
+        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
+        shortlevel,
+        tag,
+        msg
+    );
     log::log!(priority, "{}", output);
     println!("{}", output);
 }
