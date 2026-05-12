@@ -273,7 +273,14 @@ async fn handle_zw(
         let initiator_rank = get_rank(&pool, initiator_id).await.unwrap_or(0);
         let target_rank = get_rank(&pool, target_user_id).await.unwrap_or(0);
         let text = format!(
-            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{}\n次数：{}次\n排行榜位置：{}\n\n另一位：{}\n次数：{}次\n排行榜位置：{}\n\n{}",
+            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
+发起者：{}\n\
+次数：{}次\n\
+排行榜位置：{}\n\n\
+另一位：{}\n\
+次数：{}次\n\
+排行榜位置：{}\n\n\
+{}",
             initiator_name,
             markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
             initiator_count,
@@ -317,7 +324,13 @@ async fn handle_zw(
     let target_rank = get_rank(&pool, target_user_id).await?;
 
     let text = format!(
-        "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
+        "已进行双人运动！\n\n\
+{} 带上 {} 进行了性行为！\n\n\
+发起者：{}次\n\
+另一位：{}次\n\n\
+您在自慰排行榜上的位置：{}\n\
+另一位在自慰排行榜上的位置：{}\n\
+下次可进行自慰的时间：30分0秒",
         markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
         markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
         new_initiator_count,
@@ -413,7 +426,10 @@ async fn handle_zw_self(
             );
             let rank = get_rank(&pool, user_id).await?;
             let text = format!(
-                "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n您在自慰排行榜上的位置：{}\n总次数：{}次\n下次可进行自慰的时间：{}分{}秒",
+                "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
+您在自慰排行榜上的位置：{}\n\
+总次数：{}次\n\
+下次可进行自慰的时间：{}分{}秒",
                 name, rank, current_count, mins, secs
             );
             if let Err(e) = bot
@@ -454,7 +470,10 @@ async fn handle_zw_self(
 
     let rank = get_rank(&pool, user_id).await?;
     let text = format!(
-        "已开始自慰！\n\n您在自慰排行榜上的位置：{}\n总次数：{}次\n下次可进行自慰的时间：30分0秒",
+        "已开始自慰！\n\n\
+您在自慰排行榜上的位置：{}\n\
+总次数：{}次\n\
+下次可进行自慰的时间：30分0秒",
         rank, new_count
     );
     if let Err(e) = bot
@@ -640,7 +659,10 @@ async fn process_zw_for_user(
             let secs = remaining.num_seconds() % 60;
             let rank = get_rank(pool, user_id).await.unwrap_or(0);
             let text = format!(
-                "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n您在自慰排行榜上的位置：{}\n总次数：{}次\n下次可进行自慰的时间：{}分{}秒",
+                "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
+您在自慰排行榜上的位置：{}\n\
+总次数：{}次\n\
+下次可进行自慰的时间：{}分{}秒",
                 display_name, rank, current_count, mins, secs
             );
             return Ok((text, current_count));
@@ -653,7 +675,10 @@ async fn process_zw_for_user(
 
     let rank = get_rank(pool, user_id).await?;
     let text = format!(
-        "已开始自慰！\n\n您在自慰排行榜上的位置：{}\n总次数：{}次\n下次可进行自慰的时间：30分0秒",
+        "已开始自慰！\n\n\
+您在自慰排行榜上的位置：{}\n\
+总次数：{}次\n\
+下次可进行自慰的时间：30分0秒",
         rank, new_count
     );
     Ok((text, new_count))
@@ -743,7 +768,14 @@ async fn process_zw_help_for_user(
         let initiator_rank = get_rank(pool, initiator_id).await.unwrap_or(0);
         let target_rank = get_rank(pool, target_id).await.unwrap_or(0);
         return Ok(format!(
-            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n发起者：{}\n次数：{}次\n排行榜位置：{}\n\n另一位：{}\n次数：{}次\n排行榜位置：{}\n\n{}",
+            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
+发起者：{}\n\
+次数：{}次\n\
+排行榜位置：{}\n\n\
+另一位：{}\n\
+次数：{}次\n\
+排行榜位置：{}\n\n\
+{}",
             initiator_name,
             markdown::user_mention(UserId(initiator_id as u64), initiator_name),
             initiator_count,
@@ -776,7 +808,13 @@ async fn process_zw_help_for_user(
     let target_rank = get_rank(pool, target_id).await?;
 
     let text = format!(
-        "已进行双人运动！\n\n{} 带上 {} 进行了性行为！\n\n发起者：{}次\n另一位：{}次\n\n您在自慰排行榜上的位置：{}\n另一位在自慰排行榜上的位置：{}\n下次可进行自慰的时间：30分0秒",
+        "已进行双人运动！\n\n\
+{} 带上 {} 进行了性行为！\n\n\
+发起者：{}次\n\
+另一位：{}次\n\n\
+您在自慰排行榜上的位置：{}\n\
+另一位在自慰排行榜上的位置：{}\n\
+下次可进行自慰的时间：30分0秒",
         markdown::user_mention(UserId(initiator_id as u64), initiator_name),
         markdown::user_mention(UserId(target_id as u64), target_username),
         new_initiator_count,
