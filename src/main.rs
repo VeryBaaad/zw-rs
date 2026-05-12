@@ -841,10 +841,6 @@ async fn inline_query_handler(
     results.push(InlineQueryResult::Article(rank_article));
 
     let version_info = get_version_info().await?;
-    let mut version_kb = InlineKeyboardMarkup::default();
-    version_kb.inline_keyboard.push(vec![
-        teloxide::types::InlineKeyboardButton::callback("Bot 版本", "version_info"),
-    ]);
     let version_article = InlineQueryResultArticle::new(
         format!("version_{}", chrono::Utc::now().timestamp_millis()),
         "Bot 版本",
@@ -855,8 +851,7 @@ async fn inline_query_handler(
             link_preview_options: None,
         }),
     )
-    .description("查看当前Bot版本")
-    .reply_markup(version_kb);
+    .description("查看当前Bot版本");
     results.push(InlineQueryResult::Article(version_article));
 
     if !query.is_empty() {
