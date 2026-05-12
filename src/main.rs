@@ -20,7 +20,7 @@ enum Command {
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
-    log(Level::Info, "ZWBotDaemon", format!("Starting zw-rs v{} ({}) (commit {}, built at {})...", env!("CARGO_PKG_VERSION"), env!("VER_CODE"), env!("GIT_HASH"), env!("BUILD_TIME")).as_str());
+    log(Level::Info, "ZWBotDaemon", format!("Starting zw-rs v{} ({}) (commit {}, built at {}) for {}", env!("CARGO_PKG_VERSION"), env!("VER_CODE"), env!("GIT_HASH"), env!("BUILD_TIME"), env!("BUILD_TARGET")).as_str());
 
     let bot = Bot::from_env();
 
