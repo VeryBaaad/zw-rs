@@ -20,7 +20,7 @@ enum Command {
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
-    log(Level::Info, "ZWBotDaemon", format!("Starting zw-rs v{} (commit {}, built at {})...", env!("CARGO_PKG_VERSION"), env!("GIT_HASH"), env!("BUILD_TIME")).as_str());
+    log(Level::Info, "ZWBotDaemon", format!("Starting zw-rs v{} ({}) (commit {}, built at {})...", env!("CARGO_PKG_VERSION"), env!("VER_CODE"), env!("GIT_HASH"), env!("BUILD_TIME")).as_str());
 
     let bot = Bot::from_env();
 
@@ -90,7 +90,19 @@ async fn commands_handler(
             handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, page).await?;
         },
         Command::Version => {
-            bot.send_message(msg.chat.id, format!("{} v{}\nCommit {}\nBuilt at {}\nTarget {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), env!("GIT_HASH"), env!("BUILD_TIME"), env!("BUILD_TARGET"))).await?;
+            bot.send_message(msg.chat.id, 
+                format!(
+"{} v{} ({})\n\
+Commit {}\n\
+Built at {}\n\
+Target {}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+                env!("VER_CODE"),
+                env!("GIT_HASH"),
+                env!("BUILD_TIME"),
+                env!("BUILD_TARGET"))
+            ).await?;
         }
     }
     Ok(())
