@@ -90,19 +90,8 @@ async fn commands_handler(
             handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, page).await?;
         },
         Command::Version => {
-            bot.send_message(msg.chat.id, 
-                format!(
-"{} v{} ({})\n\
-Commit {}\n\
-Built at {}\n\
-Target {}",
-                env!("CARGO_PKG_NAME"),
-                env!("CARGO_PKG_VERSION"),
-                env!("VER_CODE"),
-                env!("GIT_HASH"),
-                env!("BUILD_TIME"),
-                env!("BUILD_TARGET"))
-            ).await?;
+            let version_info = get_version_info().await?;
+            bot.send_message(msg.chat.id, version_info).await?;
         }
     }
     Ok(())
@@ -851,6 +840,20 @@ async fn inline_query_handler(
     log(Level::Debug, "inline_query_handler", &format!("Answering inline query: results={}, rank_kb_rows={}", results.len(), 0));
     results.push(InlineQueryResult::Article(rank_article));
 
+    let version_info = get_version_info().await?;
+    let version_article = InlineQueryResultArticle::new(
+        format!("version_{}", chrono::Utc::now().timestamp_millis()),
+        "Bot 版本",
+        InputMessageContent::Text(teloxide::types::InputMessageContentText {
+            message_text: version_info,
+            parse_mode: None,
+            entities: None,
+            link_preview_options: None,
+        }),
+    )
+    .description("查看当前Bot版本");
+    results.push(InlineQueryResult::Article(version_article));
+
     if !query.is_empty() {
         if let Ok(user_id) = query.parse::<i64>() {
             if user_exists(&pool, user_id).await? {
@@ -1011,6 +1014,20 @@ async fn get_rank(pool: &SqlitePool, user_id: i64) -> Result<usize, Box<dyn std:
     let final_rank = (rank + 1) as usize;
     log(Level::Debug, "get_rank", &format!("User {} rank: {}", user_id, final_rank));
     Ok(final_rank)
+}
+
+async fn get_version_info() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(format!(
+"{} v{} ({})\n\
+Commit {}\n\
+Built at {}\n\
+Target {}",
+    env!("CARGO_PKG_NAME"),
+    env!("CARGO_PKG_VERSION"),
+    env!("VER_CODE"),
+    env!("GIT_HASH"),
+    env!("BUILD_TIME"),
+    env!("BUILD_TARGET")))
 }
 
 fn log(priority: Level, tag: &str, msg: &str) {
