@@ -48,7 +48,10 @@ where
     Ok(())
 }
 
-pub async fn user_exists(pool: &SqlitePool, user_id: i64) -> Result<bool, Box<dyn Error + Send + Sync>> {
+pub async fn user_exists(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<bool, Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,
         "user_exists",

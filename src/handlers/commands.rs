@@ -2,7 +2,7 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
-use crate::services::{handle_zw, handle_rank};
+use crate::services::{handle_rank, handle_zw};
 use crate::utils::logger::log;
 use log::Level;
 use sqlx::SqlitePool;

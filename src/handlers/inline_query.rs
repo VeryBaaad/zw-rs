@@ -4,9 +4,9 @@
  */
 use crate::handlers::commands::get_version_info;
 use crate::services::get_rank_keyboard;
+use crate::utils::get_total_users;
 use crate::utils::logger::log;
 use crate::utils::user_exists;
-use crate::utils::get_total_users;
 use log::Level;
 use sqlx::{Row, SqlitePool};
 use std::error::Error;

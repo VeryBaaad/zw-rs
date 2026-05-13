@@ -8,11 +8,7 @@ use chrono::{Duration, Utc};
 use log::Level;
 use sqlx::{Row, SqlitePool};
 use std::error::Error;
-use teloxide::{
-    prelude::*,
-    types::ReplyParameters,
-    utils::markdown,
-};
+use teloxide::{prelude::*, types::ReplyParameters, utils::markdown};
 
 pub async fn handle_zw(
     bot: Bot,
