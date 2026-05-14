@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::utils::logger::log;
-use crate::utils::{get_rank, upsert_user, get_user_count_and_last_time, find_user_by_id_or_username};
+use crate::utils::{get_rank, upsert_user, get_user_count_and_last_time, find_user_by_id_or_username, check_cooldown};
 use chrono::{Duration, Utc};
 use log::Level;
 use sqlx::SqlitePool;
@@ -51,35 +51,26 @@ pub async fn handle_zw(
     let mut any_in_cd = false;
     let mut cd_messages = Vec::new();
 
-    if let Some(lt) = initiator_last_time_opt {
-        let next = lt + cd_duration;
-        if now < next {
-            any_in_cd = true;
-            let remaining = next - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!(
-                "发起者 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
-                mins,
-                secs
-            ));
-        }
+    let initiator_cd = check_cooldown(initiator_last_time_opt, now, cd_duration);
+    if initiator_cd.is_in_cooldown {
+        any_in_cd = true;
+        cd_messages.push(format!(
+            "发起者 {} 仍在冷却：{}分{}秒",
+            markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
+            initiator_cd.mins,
+            initiator_cd.secs
+        ));
     }
-    if let Some(lt) = target_last_time_opt {
-        let next = lt + cd_duration;
-        if now < next {
-            any_in_cd = true;
-            let remaining = next - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!(
-                "另一位 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
-                mins,
-                secs
-            ));
-        }
+
+    let target_cd = check_cooldown(target_last_time_opt, now, cd_duration);
+    if target_cd.is_in_cooldown {
+        any_in_cd = true;
+        cd_messages.push(format!(
+            "另一位 {} 仍在冷却：{}分{}秒",
+            markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
+            target_cd.mins,
+            target_cd.secs
+        ));
     }
 
     if any_in_cd {
@@ -184,61 +175,40 @@ pub async fn handle_zw_self(
 
     let (current_count, last_time) = get_user_count_and_last_time(&pool, user_id).await?;
 
-    if let Some(last_time) = last_time {
-        let next_time = last_time + cd_duration;
+    let cd_status = check_cooldown(last_time, now, cd_duration);
+    if cd_status.is_in_cooldown {
         log(
-            Level::Debug,
+            Level::Warn,
             "handle_zw",
-            &format!("Checking cooldown: now={}, next_time={}", now, next_time),
+            &format!("User {} still in cooldown", user_id),
         );
-        if now < next_time {
-            log(
-                Level::Warn,
-                "handle_zw",
-                &format!("User {} still in cooldown", user_id),
-            );
-            let remaining = next_time - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
-            log(
-                Level::Debug,
-                "handle_zw",
-                &format!("Remaining cooldown: {}m{}s", mins, secs),
-            );
-            let rank = get_rank(&pool, user_id).await?;
-            let text = format!(
-                "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
+        let rank = get_rank(&pool, user_id).await?;
+        let text = format!(
+            "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-                name, rank, current_count, mins, secs
+            name, rank, current_count, cd_status.mins, cd_status.secs
+        );
+        if let Err(e) = bot
+            .send_message(msg.chat.id, text)
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await
+        {
+            log(
+                Level::Error,
+                "handle_zw",
+                &format!("Failed to send cooldown message: {}", e),
             );
-            if let Err(e) = bot
-                .send_message(msg.chat.id, text)
-                .reply_parameters(ReplyParameters::new(msg.id))
-                .await
-            {
-                log(
-                    Level::Error,
-                    "handle_zw",
-                    &format!("Failed to send cooldown message: {}", e),
-                );
-                return Err(Box::new(e));
-            }
-            return Ok(());
+            return Err(Box::new(e));
         }
-        log(
-            Level::Debug,
-            "handle_zw",
-            "Cooldown period expired, proceeding",
-        );
-    } else {
-        log(
-            Level::Debug,
-            "handle_zw",
-            "No previous record, first time user",
-        );
+        return Ok(());
     }
+    log(
+        Level::Debug,
+        "handle_zw",
+        "Cooldown period expired, proceeding",
+    );
 
     // Update count and last_time
     let new_count = current_count + 1;
@@ -297,22 +267,17 @@ pub async fn process_zw_for_user(
     let (current_count, last_time_opt) = get_user_count_and_last_time(pool, user_id).await?;
 
     // CD Check
-    if let Some(last_time) = last_time_opt {
-        let next_time = last_time + cd_duration;
-        if now < next_time {
-            let remaining = next_time - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
-            let rank = get_rank(pool, user_id).await.unwrap_or(0);
-            let text = format!(
-                "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
+    let cd_status = check_cooldown(last_time_opt, now, cd_duration);
+    if cd_status.is_in_cooldown {
+        let rank = get_rank(pool, user_id).await.unwrap_or(0);
+        let text = format!(
+            "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-                display_name, rank, current_count, mins, secs
-            );
-            return Ok((text, current_count));
-        }
+            display_name, rank, current_count, cd_status.mins, cd_status.secs
+        );
+        return Ok((text, current_count));
     }
 
     // Update count and last_time

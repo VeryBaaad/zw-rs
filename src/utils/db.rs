@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::utils::logger::log;
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use log::Level;
 use sqlx::{Row, SqlitePool};
 use std::error::Error;
@@ -176,5 +176,39 @@ pub async fn find_user_by_id_or_username(
         Ok(Some((count, last_time, username, user_id)))
     } else {
         Ok(None)
+    }
+}
+
+/// Cooldown status check result
+#[derive(Debug, Clone)]
+pub struct CooldownStatus {
+    pub is_in_cooldown: bool,
+    pub mins: i64,
+    pub secs: i64,
+}
+
+/// Check cooldown status for a user
+pub fn check_cooldown(
+    last_time: Option<chrono::DateTime<Utc>>,
+    now: chrono::DateTime<Utc>,
+    duration: Duration,
+) -> CooldownStatus {
+    if let Some(lt) = last_time {
+        let next_time = lt + duration;
+        if now < next_time {
+            let remaining = next_time - now;
+            let mins = remaining.num_minutes();
+            let secs = remaining.num_seconds() % 60;
+            return CooldownStatus {
+                is_in_cooldown: true,
+                mins,
+                secs,
+            };
+        }
+    }
+    CooldownStatus {
+        is_in_cooldown: false,
+        mins: 0,
+        secs: 0,
     }
 }
