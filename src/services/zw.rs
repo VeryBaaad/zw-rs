@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::utils::logger::log;
-use crate::utils::{get_rank, upsert_user};
+use crate::utils::{get_rank, upsert_user, get_user_count_and_last_time, find_user_by_id_or_username};
 use chrono::{Duration, Utc};
 use log::Level;
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::{prelude::*, types::ReplyParameters, utils::markdown};
 
@@ -27,47 +27,6 @@ pub async fn handle_zw(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    // find the target user record by id or username
-    async fn find_user_record(
-        pool: &SqlitePool,
-        key: &str,
-    ) -> Result<Option<(i64, Option<chrono::DateTime<Utc>>, String, i64)>, sqlx::Error> {
-        // try to parse as user_id first
-        if let Ok(id) = key.parse::<i64>() {
-            if let Some(row) = sqlx::query(
-                "SELECT count, last_time, username, user_id FROM users WHERE user_id = ?",
-            )
-            .bind(id)
-            .fetch_optional(pool)
-            .await?
-            {
-                let count: i64 = row.try_get("count")?;
-                let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-                let username: String = row.try_get("username")?;
-                let user_id: i64 = row.try_get("user_id")?;
-                return Ok(Some((count, last_time, username, user_id)));
-            }
-            Ok(None)
-        } else {
-            // try to parse as username (with optional @)
-            let uname = key.trim_start_matches('@');
-            if let Some(row) = sqlx::query(
-                "SELECT count, last_time, username, user_id FROM users WHERE username = ?",
-            )
-            .bind(uname)
-            .fetch_optional(pool)
-            .await?
-            {
-                let count: i64 = row.try_get("count")?;
-                let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-                let username: String = row.try_get("username")?;
-                let user_id: i64 = row.try_get("user_id")?;
-                return Ok(Some((count, last_time, username, user_id)));
-            }
-            Ok(None)
-        }
-    }
-
     if target_arg.is_none() {
         return handle_zw_self(bot, msg, pool).await;
     }
@@ -75,7 +34,7 @@ pub async fn handle_zw(
     let target_key = target_arg.unwrap();
     let target_key = target_key.trim().trim_start_matches('@').to_string();
 
-    let target_record = find_user_record(&pool, &target_key).await?;
+    let target_record = find_user_by_id_or_username(&pool, &target_key).await?;
     if target_record.is_none() {
         let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
         let _ = bot
@@ -87,17 +46,7 @@ pub async fn handle_zw(
     let (target_count, target_last_time_opt, target_username, target_user_id) =
         target_record.unwrap();
 
-    let initiator_row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(initiator_id)
-        .fetch_optional(&pool)
-        .await?;
-    let (initiator_count, initiator_last_time_opt) = if let Some(row) = initiator_row {
-        let c: i64 = row.try_get("count")?;
-        let lt: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-        (c, lt)
-    } else {
-        (0, None)
-    };
+    let (initiator_count, initiator_last_time_opt) = get_user_count_and_last_time(&pool, initiator_id).await?;
 
     let mut any_in_cd = false;
     let mut cd_messages = Vec::new();
@@ -233,39 +182,7 @@ pub async fn handle_zw_self(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    // Check if user exists
-    log(
-        Level::Debug,
-        "handle_zw",
-        &format!("Querying user {} from database", user_id),
-    );
-    let row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(user_id)
-        .fetch_optional(&pool)
-        .await?;
-    log(
-        Level::Debug,
-        "handle_zw",
-        &format!("Query result: user_exists = {}", row.is_some()),
-    );
-
-    let (current_count, last_time) = if let Some(row) = row {
-        let count: i64 = row.try_get("count")?;
-        let last_time: chrono::DateTime<Utc> = row.try_get("last_time")?;
-        log(
-            Level::Debug,
-            "handle_zw",
-            &format!("User exists: count={}, last_time={}", count, last_time),
-        );
-        (count, Some(last_time))
-    } else {
-        log(
-            Level::Debug,
-            "handle_zw",
-            "New user, count=0, last_time=None",
-        );
-        (0, None)
-    };
+    let (current_count, last_time) = get_user_count_and_last_time(&pool, user_id).await?;
 
     if let Some(last_time) = last_time {
         let next_time = last_time + cd_duration;
@@ -377,18 +294,7 @@ pub async fn process_zw_for_user(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    // Search for user record
-    let row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
-    let (current_count, last_time_opt) = if let Some(row) = row {
-        let count: i64 = row.try_get("count")?;
-        let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-        (count, last_time)
-    } else {
-        (0, None)
-    };
+    let (current_count, last_time_opt) = get_user_count_and_last_time(pool, user_id).await?;
 
     // CD Check
     if let Some(last_time) = last_time_opt {
@@ -443,31 +349,8 @@ pub async fn process_zw_help_for_user(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    // Get initiator record
-    let initiator_row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(initiator_id)
-        .fetch_optional(pool)
-        .await?;
-    let (initiator_count, initiator_last_time_opt) = if let Some(row) = initiator_row {
-        let c: i64 = row.try_get("count")?;
-        let lt: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-        (c, lt)
-    } else {
-        (0, None)
-    };
-
-    // Get target record
-    let target_row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(target_id)
-        .fetch_optional(pool)
-        .await?;
-    let (target_count, target_last_time_opt) = if let Some(row) = target_row {
-        let c: i64 = row.try_get("count")?;
-        let lt: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-        (c, lt)
-    } else {
-        (0, None)
-    };
+    let (initiator_count, initiator_last_time_opt) = get_user_count_and_last_time(pool, initiator_id).await?;
+    let (target_count, target_last_time_opt) = get_user_count_and_last_time(pool, target_id).await?;
 
     // CD Check
     let mut any_in_cd = false;
