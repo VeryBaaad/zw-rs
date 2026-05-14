@@ -11,6 +11,59 @@ use teloxide::{
     types::{InlineKeyboardMarkup, MessageId, ReplyParameters},
 };
 
+const PER_PAGE: i64 = 10;
+const RANK_TITLE: &str = "自慰排行榜\n\n";
+
+/// Calculate pagination info from total count and page number
+pub fn calculate_page_info(total: usize, page: usize) -> (usize, i64) {
+    let max_page_index = if total > 0 {
+        ((total as f64 / PER_PAGE as f64).ceil() as usize) - 1
+    } else {
+        0
+    };
+    let valid_page = if page <= max_page_index { page } else { 0 };
+    let offset: i64 = (valid_page as i64) * PER_PAGE;
+    (valid_page, offset)
+}
+
+/// Build rank text from database rows
+pub fn build_rank_text(rows: &[sqlx::sqlite::SqliteRow], offset: i64) -> Result<String, sqlx::Error> {
+    let mut text = RANK_TITLE.to_string();
+    for (i, row) in rows.iter().enumerate() {
+        let rank = (offset + i as i64 + 1) as usize;
+        let username: String = row.try_get("username")?;
+        let count: i64 = row.try_get("count")?;
+        let user_id: i64 = row.try_get("user_id")?;
+        text.push_str(&format!(
+            "{}. {}: {}次\n{}\n",
+            rank, username, count, user_id
+        ));
+    }
+    Ok(text)
+}
+
+/// Build pagination keyboard
+pub fn build_rank_keyboard(valid_page: usize, total: usize) -> InlineKeyboardMarkup {
+    let mut keyboard = InlineKeyboardMarkup::default();
+    let mut row = Vec::new();
+    if valid_page > 0 {
+        row.push(teloxide::types::InlineKeyboardButton::callback(
+            "上一页",
+            format!("rank_{}", valid_page - 1),
+        ));
+    }
+    if (valid_page + 1) * (PER_PAGE as usize) < total {
+        row.push(teloxide::types::InlineKeyboardButton::callback(
+            "下一页",
+            format!("rank_{}", valid_page + 1),
+        ));
+    }
+    if !row.is_empty() {
+        keyboard.inline_keyboard.push(row);
+    }
+    keyboard
+}
+
 pub async fn handle_rank(
     bot: Bot,
     chat_id: ChatId,
@@ -24,7 +77,6 @@ pub async fn handle_rank(
         "handle_rank",
         &format!("Handling rank command: page={}", page),
     );
-    let per_page: i64 = 10;
 
     log(Level::Debug, "handle_rank", "Querying total user count");
     let total = sqlx::query("SELECT COUNT(*) as count FROM users")
@@ -37,20 +89,13 @@ pub async fn handle_rank(
         &format!("Total users in database: {}", total),
     );
 
-    let max_page_index = if total > 0 {
-        ((total as f64 / per_page as f64).ceil() as usize) - 1
-    } else {
-        0
-    };
-
-    let valid_page = if page <= max_page_index { page } else { 0 };
-    let offset: i64 = (valid_page as i64) * per_page;
+    let (valid_page, offset) = calculate_page_info(total, page);
     log(
         Level::Debug,
         "handle_rank",
         &format!(
             "Fetching rankings: per_page={}, offset={}",
-            per_page, offset
+            PER_PAGE, offset
         ),
     );
 
@@ -58,7 +103,7 @@ pub async fn handle_rank(
     let rows = sqlx::query(
         "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
     )
-    .bind(per_page)
+    .bind(PER_PAGE)
     .bind(offset)
     .fetch_all(&pool)
     .await?;
@@ -68,35 +113,8 @@ pub async fn handle_rank(
         &format!("Retrieved {} users from database", rows.len()),
     );
 
-    let mut text = "自慰排行榜\n\n".to_string();
-    for (i, row) in rows.iter().enumerate() {
-        let rank = (offset + i as i64 + 1) as usize;
-        let username: String = row.try_get("username")?;
-        let count: i64 = row.try_get("count")?;
-        let user_id: i64 = row.try_get("user_id")?;
-        text.push_str(&format!(
-            "{}. {}: {}次\n{}\n",
-            rank, username, count, user_id
-        ));
-    }
-
-    let mut keyboard = InlineKeyboardMarkup::default();
-    let mut row = Vec::new();
-    if valid_page > 0 {
-        row.push(teloxide::types::InlineKeyboardButton::callback(
-            "上一页",
-            format!("rank_{}", valid_page - 1),
-        ));
-    }
-    if (valid_page + 1) * (per_page as usize) < total {
-        row.push(teloxide::types::InlineKeyboardButton::callback(
-            "下一页",
-            format!("rank_{}", valid_page + 1),
-        ));
-    }
-    if !row.is_empty() {
-        keyboard.inline_keyboard.push(row);
-    }
+    let text = build_rank_text(&rows, offset)?;
+    let keyboard = build_rank_keyboard(valid_page, total);
 
     if let Some(message_id) = message_id {
         log(Level::Debug, "handle_rank", "Editing existing rank message");
@@ -135,46 +153,3 @@ pub async fn handle_rank(
     Ok(())
 }
 
-pub async fn get_rank_keyboard(
-    pool: &SqlitePool,
-    page: usize,
-) -> Result<InlineKeyboardMarkup, Box<dyn Error + Send + Sync>> {
-    log(
-        Level::Debug,
-        "get_rank_keyboard",
-        &format!("Generating rank keyboard for page {}", page),
-    );
-
-    let per_page: i64 = 10;
-    let total = crate::utils::get_total_users(pool).await? as usize;
-
-    let max_page_index = if total > 0 {
-        ((total as f64 / per_page as f64).ceil() as usize) - 1
-    } else {
-        0
-    };
-
-    let valid_page = if page <= max_page_index { page } else { 0 };
-
-    let mut keyboard = InlineKeyboardMarkup::default();
-    let mut row = Vec::new();
-
-    if valid_page > 0 {
-        row.push(teloxide::types::InlineKeyboardButton::callback(
-            "上一页",
-            format!("rank_{}", valid_page - 1),
-        ));
-    }
-    if (valid_page + 1) * (per_page as usize) < total {
-        row.push(teloxide::types::InlineKeyboardButton::callback(
-            "下一页",
-            format!("rank_{}", valid_page + 1),
-        ));
-    }
-
-    if !row.is_empty() {
-        keyboard.inline_keyboard.push(row);
-    }
-
-    Ok(keyboard)
-}

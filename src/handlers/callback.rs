@@ -2,12 +2,12 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
-use crate::services::{handle_rank, process_zw_for_user, process_zw_help_for_user};
+use crate::services::{handle_rank, process_zw_for_user, process_zw_help_for_user, calculate_page_info, build_rank_text, build_rank_keyboard};
 use crate::utils::logger::log;
 use log::Level;
 use sqlx::{Row, SqlitePool};
 use std::error::Error;
-use teloxide::{prelude::*, types::InlineKeyboardMarkup};
+use teloxide::prelude::*;
 
 pub async fn callback_handler(
     bot: Bot,
@@ -56,51 +56,17 @@ pub async fn callback_handler(
                     &format!("rank callback editing inline_message_id {}", inline_id),
                 );
 
-                let per_page: i64 = 10;
                 let total = sqlx::query("SELECT COUNT(*) as count FROM users")
                     .fetch_one(&pool)
                     .await?
                     .try_get::<i64, _>("count")? as usize;
-                let max_page_index = if total > 0 {
-                    ((total as f64 / per_page as f64).ceil() as usize) - 1
-                } else {
-                    0
-                };
-                let valid_page = if page <= max_page_index { page } else { 0 };
-                let offset: i64 = (valid_page as i64) * per_page;
+                let (valid_page, offset) = calculate_page_info(total, page);
 
                 let rows = sqlx::query("SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?")
-                    .bind(per_page).bind(offset).fetch_all(&pool).await?;
+                    .bind(10i64).bind(offset).fetch_all(&pool).await?;
 
-                let mut text = "自慰排行榜\n\n".to_string();
-                for (i, row) in rows.iter().enumerate() {
-                    let rank = (offset + i as i64 + 1) as usize;
-                    let username: String = row.try_get("username")?;
-                    let count: i64 = row.try_get("count")?;
-                    let user_id: i64 = row.try_get("user_id")?;
-                    text.push_str(&format!(
-                        "{}. {}: {}次\n{}\n",
-                        rank, username, count, user_id
-                    ));
-                }
-
-                let mut keyboard = InlineKeyboardMarkup::default();
-                let mut row = Vec::new();
-                if valid_page > 0 {
-                    row.push(teloxide::types::InlineKeyboardButton::callback(
-                        "上一页",
-                        format!("rank_{}", valid_page - 1),
-                    ));
-                }
-                if (valid_page + 1) * (per_page as usize) < total {
-                    row.push(teloxide::types::InlineKeyboardButton::callback(
-                        "下一页",
-                        format!("rank_{}", valid_page + 1),
-                    ));
-                }
-                if !row.is_empty() {
-                    keyboard.inline_keyboard.push(row);
-                }
+                let text = build_rank_text(&rows, offset)?;
+                let keyboard = build_rank_keyboard(valid_page, total);
 
                 if let Err(e) = bot
                     .edit_message_text_inline(inline_id.as_str(), text)
