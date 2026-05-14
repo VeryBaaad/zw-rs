@@ -203,8 +203,11 @@ pub async fn handle_zw(
         target_rank
     );
 
-    bot.send_message(msg.chat.id, text)
+    bot.send_message(msg.chat.id, &text)
         .reply_parameters(ReplyParameters::new(msg.id))
+        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+        .await?;
+    bot.send_message(UserId(target_user_id as u64), text)
         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
         .await?;
 

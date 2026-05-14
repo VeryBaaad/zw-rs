@@ -358,6 +358,9 @@ pub async fn callback_handler(
                                     "zw_user callback but q.message and inline_message_id are None",
                                 );
                             }
+                            bot.send_message(UserId(target_id as u64), text)
+                                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                .await?;
                         }
                         Err(e) => {
                             log(
