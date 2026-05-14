@@ -2,7 +2,10 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
-use crate::services::{handle_rank, process_zw_for_user, process_zw_help_for_user, calculate_page_info, build_rank_text, build_rank_keyboard};
+use crate::services::{
+    build_rank_keyboard, build_rank_text, calculate_page_info, handle_rank, process_zw_for_user,
+    process_zw_help_for_user,
+};
 use crate::utils::logger::log;
 use log::Level;
 use sqlx::{Row, SqlitePool};

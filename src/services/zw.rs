@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::utils::logger::log;
-use crate::utils::{get_rank, upsert_user, get_user_count_and_last_time, find_user_by_id_or_username, check_cooldown};
+use crate::utils::{
+    check_cooldown, find_user_by_id_or_username, get_rank, get_user_count_and_last_time,
+    upsert_user,
+};
 use chrono::{Duration, Utc};
 use log::Level;
 use sqlx::SqlitePool;
@@ -46,7 +49,8 @@ pub async fn handle_zw(
     let (target_count, target_last_time_opt, target_username, target_user_id) =
         target_record.unwrap();
 
-    let (initiator_count, initiator_last_time_opt) = get_user_count_and_last_time(&pool, initiator_id).await?;
+    let (initiator_count, initiator_last_time_opt) =
+        get_user_count_and_last_time(&pool, initiator_id).await?;
 
     let mut any_in_cd = false;
     let mut cd_messages = Vec::new();
@@ -314,8 +318,10 @@ pub async fn process_zw_help_for_user(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    let (initiator_count, initiator_last_time_opt) = get_user_count_and_last_time(pool, initiator_id).await?;
-    let (target_count, target_last_time_opt) = get_user_count_and_last_time(pool, target_id).await?;
+    let (initiator_count, initiator_last_time_opt) =
+        get_user_count_and_last_time(pool, initiator_id).await?;
+    let (target_count, target_last_time_opt) =
+        get_user_count_and_last_time(pool, target_id).await?;
 
     // CD Check
     let mut any_in_cd = false;

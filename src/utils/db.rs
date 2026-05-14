@@ -135,7 +135,8 @@ pub async fn get_user_count_and_last_time(
 pub async fn find_user_by_id_or_username(
     pool: &SqlitePool,
     key: &str,
-) -> Result<Option<(i64, Option<chrono::DateTime<Utc>>, String, i64)>, Box<dyn Error + Send + Sync>> {
+) -> Result<Option<(i64, Option<chrono::DateTime<Utc>>, String, i64)>, Box<dyn Error + Send + Sync>>
+{
     log(
         Level::Debug,
         "find_user_by_id_or_username",
@@ -144,12 +145,11 @@ pub async fn find_user_by_id_or_username(
 
     // try to parse as user_id first
     if let Ok(id) = key.parse::<i64>() {
-        if let Some(row) = sqlx::query(
-            "SELECT count, last_time, username, user_id FROM users WHERE user_id = ?",
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
+        if let Some(row) =
+            sqlx::query("SELECT count, last_time, username, user_id FROM users WHERE user_id = ?")
+                .bind(id)
+                .fetch_optional(pool)
+                .await?
         {
             let count: i64 = row.try_get("count")?;
             let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
@@ -162,12 +162,11 @@ pub async fn find_user_by_id_or_username(
 
     // try to parse as username (with optional @)
     let uname = key.trim_start_matches('@');
-    if let Some(row) = sqlx::query(
-        "SELECT count, last_time, username, user_id FROM users WHERE username = ?",
-    )
-    .bind(uname)
-    .fetch_optional(pool)
-    .await?
+    if let Some(row) =
+        sqlx::query("SELECT count, last_time, username, user_id FROM users WHERE username = ?")
+            .bind(uname)
+            .fetch_optional(pool)
+            .await?
     {
         let count: i64 = row.try_get("count")?;
         let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();

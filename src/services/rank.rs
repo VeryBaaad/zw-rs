@@ -27,7 +27,10 @@ pub fn calculate_page_info(total: usize, page: usize) -> (usize, i64) {
 }
 
 /// Build rank text from database rows
-pub fn build_rank_text(rows: &[sqlx::sqlite::SqliteRow], offset: i64) -> Result<String, sqlx::Error> {
+pub fn build_rank_text(
+    rows: &[sqlx::sqlite::SqliteRow],
+    offset: i64,
+) -> Result<String, sqlx::Error> {
     let mut text = RANK_TITLE.to_string();
     for (i, row) in rows.iter().enumerate() {
         let rank = (offset + i as i64 + 1) as usize;
@@ -152,4 +155,3 @@ pub async fn handle_rank(
     );
     Ok(())
 }
-
