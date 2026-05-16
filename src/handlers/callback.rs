@@ -303,7 +303,7 @@ pub async fn callback_handler(
                     )
                     .await
                     {
-                        Ok(text) => {
+                        Ok((text, success)) => {
                             if let Some(msg) = &q.message {
                                 log(
                                     Level::Debug,
@@ -357,6 +357,11 @@ pub async fn callback_handler(
                                     "callback_handler",
                                     "zw_user callback but q.message and inline_message_id are None",
                                 );
+                            }
+                            if success {
+                                bot.send_message(UserId(target_id as u64), text)
+                                    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                    .await?;
                             }
                         }
                         Err(e) => {
