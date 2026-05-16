@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::handlers::commands::get_version_info;
-use crate::services::get_rank_keyboard;
+use crate::services::{build_rank_keyboard, build_rank_text, calculate_page_info};
 use crate::utils::get_total_users;
 use crate::utils::logger::log;
 use crate::utils::user_exists;
 use log::Level;
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::{
     prelude::*,
@@ -29,28 +29,24 @@ pub async fn inline_query_handler(
     let mut results: Vec<InlineQueryResult> = Vec::new();
 
     // Generate rank text and keyboard
-    let per_page: i64 = 10;
     let rank_text = async {
         match async {
-            let _total = get_total_users(&pool).await? as i64;
-            let offset: i64 = 0;
+            let total = match get_total_users(&pool).await {
+                Ok(t) => t as usize,
+                Err(e) => return Err::<String, Box<dyn Error + Send + Sync>>(e),
+            };
+            let (_valid_page, offset) = calculate_page_info(total, 0);
             let rows = sqlx::query(
                 "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
             )
-            .bind(per_page)
+            .bind(10i64)
             .bind(offset)
             .fetch_all(&pool)
-            .await?;
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
-            let mut text = "自慰排行榜\n\n".to_string();
-            for (i, row) in rows.iter().enumerate() {
-                let rank = (i as i64 + 1) as usize;
-                let username: String = row.try_get("username")?;
-                let count: i64 = row.try_get("count")?;
-                let user_id: i64 = row.try_get("user_id")?;
-                text.push_str(&format!("{}. {}: {}次\n{}\n", rank, username, count, user_id));
-            }
-            Ok::<String, Box<dyn Error + Send + Sync>>(text)
+            build_rank_text(&rows, offset)
+                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)
         }.await {
             Ok(t) => t,
             Err(e) => {
@@ -83,16 +79,19 @@ pub async fn inline_query_handler(
     .reply_markup(zw_kb);
     results.push(InlineQueryResult::Article(zw_article));
 
-    let rank_keyboard = match get_rank_keyboard(&pool, 0).await {
-        Ok(k) => k,
-        Err(e) => {
-            log(
-                Level::Error,
-                "inline_query_handler",
-                &format!("get_rank_keyboard error: {}", e),
-            );
-            teloxide::types::InlineKeyboardMarkup::default()
-        }
+    let rank_keyboard = {
+        let total = match get_total_users(&pool).await {
+            Ok(t) => t as usize,
+            Err(e) => {
+                log(
+                    Level::Error,
+                    "inline_query_handler",
+                    &format!("get_total_users error: {}", e),
+                );
+                0
+            }
+        };
+        build_rank_keyboard(0, total)
     };
     let rank_article = InlineQueryResultArticle::new(
         format!("rank_{}", chrono::Utc::now().timestamp_millis()),
@@ -155,25 +154,9 @@ pub async fn inline_query_handler(
                 results.push(InlineQueryResult::Article(art));
             }
         } else if let Ok(page) = query.parse::<usize>() {
-            let per_page: i64 = 10;
             let total = get_total_users(&pool).await? as usize;
-            let max_page_index = if total > 0 {
-                ((total as f64 / per_page as f64).ceil() as usize) - 1
-            } else {
-                0
-            };
-            let valid_page = if page <= max_page_index { page } else { 0 };
-            let rk = match get_rank_keyboard(&pool, valid_page).await {
-                Ok(k) => k,
-                Err(e) => {
-                    log(
-                        Level::Error,
-                        "inline_query_handler",
-                        &format!("get_rank_keyboard error: {}", e),
-                    );
-                    teloxide::types::InlineKeyboardMarkup::default()
-                }
-            };
+            let (valid_page, _offset) = calculate_page_info(total, page);
+            let rk = build_rank_keyboard(valid_page, total);
             let art = InlineQueryResultArticle::new(
                 format!("rank_{}", valid_page),
                 format!("排行榜 第{}页", valid_page + 1),

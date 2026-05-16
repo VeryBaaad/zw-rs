@@ -3,10 +3,13 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::utils::logger::log;
-use crate::utils::{get_rank, upsert_user};
+use crate::utils::{
+    check_cooldown, find_user_by_id_or_username, get_rank, get_user_count_and_last_time,
+    upsert_user,
+};
 use chrono::{Duration, Utc};
 use log::Level;
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::{prelude::*, types::ReplyParameters, utils::markdown};
 
@@ -27,47 +30,6 @@ pub async fn handle_zw(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    // find the target user record by id or username
-    async fn find_user_record(
-        pool: &SqlitePool,
-        key: &str,
-    ) -> Result<Option<(i64, Option<chrono::DateTime<Utc>>, String, i64)>, sqlx::Error> {
-        // try to parse as user_id first
-        if let Ok(id) = key.parse::<i64>() {
-            if let Some(row) = sqlx::query(
-                "SELECT count, last_time, username, user_id FROM users WHERE user_id = ?",
-            )
-            .bind(id)
-            .fetch_optional(pool)
-            .await?
-            {
-                let count: i64 = row.try_get("count")?;
-                let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-                let username: String = row.try_get("username")?;
-                let user_id: i64 = row.try_get("user_id")?;
-                return Ok(Some((count, last_time, username, user_id)));
-            }
-            Ok(None)
-        } else {
-            // try to parse as username (with optional @)
-            let uname = key.trim_start_matches('@');
-            if let Some(row) = sqlx::query(
-                "SELECT count, last_time, username, user_id FROM users WHERE username = ?",
-            )
-            .bind(uname)
-            .fetch_optional(pool)
-            .await?
-            {
-                let count: i64 = row.try_get("count")?;
-                let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-                let username: String = row.try_get("username")?;
-                let user_id: i64 = row.try_get("user_id")?;
-                return Ok(Some((count, last_time, username, user_id)));
-            }
-            Ok(None)
-        }
-    }
-
     if target_arg.is_none() {
         return handle_zw_self(bot, msg, pool).await;
     }
@@ -75,7 +37,7 @@ pub async fn handle_zw(
     let target_key = target_arg.unwrap();
     let target_key = target_key.trim().trim_start_matches('@').to_string();
 
-    let target_record = find_user_record(&pool, &target_key).await?;
+    let target_record = find_user_by_id_or_username(&pool, &target_key).await?;
     if target_record.is_none() {
         let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
         let _ = bot
@@ -87,50 +49,32 @@ pub async fn handle_zw(
     let (target_count, target_last_time_opt, target_username, target_user_id) =
         target_record.unwrap();
 
-    let initiator_row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(initiator_id)
-        .fetch_optional(&pool)
-        .await?;
-    let (initiator_count, initiator_last_time_opt) = if let Some(row) = initiator_row {
-        let c: i64 = row.try_get("count")?;
-        let lt: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-        (c, lt)
-    } else {
-        (0, None)
-    };
+    let (initiator_count, initiator_last_time_opt) =
+        get_user_count_and_last_time(&pool, initiator_id).await?;
 
     let mut any_in_cd = false;
     let mut cd_messages = Vec::new();
 
-    if let Some(lt) = initiator_last_time_opt {
-        let next = lt + cd_duration;
-        if now < next {
-            any_in_cd = true;
-            let remaining = next - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!(
-                "发起者 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
-                mins,
-                secs
-            ));
-        }
+    let initiator_cd = check_cooldown(initiator_last_time_opt, now, cd_duration);
+    if initiator_cd.is_in_cooldown {
+        any_in_cd = true;
+        cd_messages.push(format!(
+            "发起者 {} 仍在冷却：{}分{}秒",
+            markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
+            initiator_cd.mins,
+            initiator_cd.secs
+        ));
     }
-    if let Some(lt) = target_last_time_opt {
-        let next = lt + cd_duration;
-        if now < next {
-            any_in_cd = true;
-            let remaining = next - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
-            cd_messages.push(format!(
-                "另一位 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
-                mins,
-                secs
-            ));
-        }
+
+    let target_cd = check_cooldown(target_last_time_opt, now, cd_duration);
+    if target_cd.is_in_cooldown {
+        any_in_cd = true;
+        cd_messages.push(format!(
+            "另一位 {} 仍在冷却：{}分{}秒",
+            markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
+            target_cd.mins,
+            target_cd.secs
+        ));
     }
 
     if any_in_cd {
@@ -238,95 +182,42 @@ pub async fn handle_zw_self(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    // Check if user exists
-    log(
-        Level::Debug,
-        "handle_zw",
-        &format!("Querying user {} from database", user_id),
-    );
-    let row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(user_id)
-        .fetch_optional(&pool)
-        .await?;
-    log(
-        Level::Debug,
-        "handle_zw",
-        &format!("Query result: user_exists = {}", row.is_some()),
-    );
+    let (current_count, last_time) = get_user_count_and_last_time(&pool, user_id).await?;
 
-    let (current_count, last_time) = if let Some(row) = row {
-        let count: i64 = row.try_get("count")?;
-        let last_time: chrono::DateTime<Utc> = row.try_get("last_time")?;
+    let cd_status = check_cooldown(last_time, now, cd_duration);
+    if cd_status.is_in_cooldown {
         log(
-            Level::Debug,
+            Level::Warn,
             "handle_zw",
-            &format!("User exists: count={}, last_time={}", count, last_time),
+            &format!("User {} still in cooldown", user_id),
         );
-        (count, Some(last_time))
-    } else {
-        log(
-            Level::Debug,
-            "handle_zw",
-            "New user, count=0, last_time=None",
-        );
-        (0, None)
-    };
-
-    if let Some(last_time) = last_time {
-        let next_time = last_time + cd_duration;
-        log(
-            Level::Debug,
-            "handle_zw",
-            &format!("Checking cooldown: now={}, next_time={}", now, next_time),
-        );
-        if now < next_time {
-            log(
-                Level::Warn,
-                "handle_zw",
-                &format!("User {} still in cooldown", user_id),
-            );
-            let remaining = next_time - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
-            log(
-                Level::Debug,
-                "handle_zw",
-                &format!("Remaining cooldown: {}m{}s", mins, secs),
-            );
-            let rank = get_rank(&pool, user_id).await?;
-            let text = format!(
-                "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
+        let rank = get_rank(&pool, user_id).await?;
+        let text = format!(
+            "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-                name, rank, current_count, mins, secs
+            name, rank, current_count, cd_status.mins, cd_status.secs
+        );
+        if let Err(e) = bot
+            .send_message(msg.chat.id, text)
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await
+        {
+            log(
+                Level::Error,
+                "handle_zw",
+                &format!("Failed to send cooldown message: {}", e),
             );
-            if let Err(e) = bot
-                .send_message(msg.chat.id, text)
-                .reply_parameters(ReplyParameters::new(msg.id))
-                .await
-            {
-                log(
-                    Level::Error,
-                    "handle_zw",
-                    &format!("Failed to send cooldown message: {}", e),
-                );
-                return Err(Box::new(e));
-            }
-            return Ok(());
+            return Err(Box::new(e));
         }
-        log(
-            Level::Debug,
-            "handle_zw",
-            "Cooldown period expired, proceeding",
-        );
-    } else {
-        log(
-            Level::Debug,
-            "handle_zw",
-            "No previous record, first time user",
-        );
+        return Ok(());
     }
+    log(
+        Level::Debug,
+        "handle_zw",
+        "Cooldown period expired, proceeding",
+    );
 
     // Update count and last_time
     let new_count = current_count + 1;
@@ -382,36 +273,20 @@ pub async fn process_zw_for_user(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    // Search for user record
-    let row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
-    let (current_count, last_time_opt) = if let Some(row) = row {
-        let count: i64 = row.try_get("count")?;
-        let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-        (count, last_time)
-    } else {
-        (0, None)
-    };
+    let (current_count, last_time_opt) = get_user_count_and_last_time(pool, user_id).await?;
 
     // CD Check
-    if let Some(last_time) = last_time_opt {
-        let next_time = last_time + cd_duration;
-        if now < next_time {
-            let remaining = next_time - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
-            let rank = get_rank(pool, user_id).await.unwrap_or(0);
-            let text = format!(
-                "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
+    let cd_status = check_cooldown(last_time_opt, now, cd_duration);
+    if cd_status.is_in_cooldown {
+        let rank = get_rank(pool, user_id).await.unwrap_or(0);
+        let text = format!(
+            "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-                display_name, rank, current_count, mins, secs
-            );
-            return Ok((text, current_count));
-        }
+            display_name, rank, current_count, cd_status.mins, cd_status.secs
+        );
+        return Ok((text, current_count));
     }
 
     // Update count and last_time
@@ -448,31 +323,10 @@ pub async fn process_zw_help_for_user(
     let now = Utc::now();
     let cd_duration = Duration::minutes(30);
 
-    // Get initiator record
-    let initiator_row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(initiator_id)
-        .fetch_optional(pool)
-        .await?;
-    let (initiator_count, initiator_last_time_opt) = if let Some(row) = initiator_row {
-        let c: i64 = row.try_get("count")?;
-        let lt: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-        (c, lt)
-    } else {
-        (0, None)
-    };
-
-    // Get target record
-    let target_row = sqlx::query("SELECT count, last_time FROM users WHERE user_id = ?")
-        .bind(target_id)
-        .fetch_optional(pool)
-        .await?;
-    let (target_count, target_last_time_opt) = if let Some(row) = target_row {
-        let c: i64 = row.try_get("count")?;
-        let lt: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
-        (c, lt)
-    } else {
-        (0, None)
-    };
+    let (initiator_count, initiator_last_time_opt) =
+        get_user_count_and_last_time(pool, initiator_id).await?;
+    let (target_count, target_last_time_opt) =
+        get_user_count_and_last_time(pool, target_id).await?;
 
     // CD Check
     let mut any_in_cd = false;
