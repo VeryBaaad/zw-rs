@@ -512,8 +512,9 @@ pub async fn process_zw_help_for_user(
     if any_in_cd {
         let initiator_rank = get_rank(pool, initiator_id).await.unwrap_or(0);
         let target_rank = get_rank(pool, target_id).await.unwrap_or(0);
-        return Ok((format!(
-            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
+        return Ok((
+            format!(
+                "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
 发起者：{}\n\
 次数：{}次\n\
 排行榜位置：{}\n\n\
@@ -521,15 +522,17 @@ pub async fn process_zw_help_for_user(
 次数：{}次\n\
 排行榜位置：{}\n\n\
 {}",
-            initiator_name,
-            markdown::user_mention(UserId(initiator_id as u64), initiator_name),
-            initiator_count,
-            initiator_rank,
-            markdown::user_mention(UserId(target_id as u64), target_username),
-            target_count,
-            target_rank,
-            cd_messages.join("\n")
-        ), false));
+                initiator_name,
+                markdown::user_mention(UserId(initiator_id as u64), initiator_name),
+                initiator_count,
+                initiator_rank,
+                markdown::user_mention(UserId(target_id as u64), target_username),
+                target_count,
+                target_rank,
+                cd_messages.join("\n")
+            ),
+            false,
+        ));
     }
 
     // Update both users
