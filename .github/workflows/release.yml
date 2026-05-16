@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  run:
+    name: Build for (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: x86_64
+          - name: Linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - name: macOS
+            os: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.os == 'windows-latest'
+      - name: Setup Rust toolchain
+        run: |
+          rustup toolchain install
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
+          cache-all-crates: "true"
+
+      - name: Build
+        run: |
+          cargo build --release --all-targets --all-features --workspace --target ${{ matrix.target }}
+
+      - name: Rename
+        if: matrix.os == 'windows-latest'
+        run: Rename-Item -Path ".\target\${{ matrix.target }}\release\zw-rs.exe" -NewName "zw-rs"
+
+      - name: Upload release
+        uses: actions/upload-artifact@v7
+        with:
+          name: zw-rs-${{ matrix.arch }}-${{ matrix.name }}
+          path: "./target/${{ matrix.target }}/release/zw-rs"
+
+  get-and-release:
+    name: Release to GitHub
+    needs: run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ./artifacts
+      - name: Install git-cliff
+        run: |
+          curl -sSL https://github.com/orhun/git-cliff/releases/download/v2.10.1/git-cliff-2.10.1-x86_64-unknown-linux-gnu.tar.gz -o git-cliff.tar.gz
+          tar -xf git-cliff.tar.gz
+          sudo mv git-cliff-2.10.1/git-cliff /usr/local/bin/
+      - name: Generate Changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          git-cliff "$PREV_TAG".. -o /tmp/changelog.md
+      - name: Create Release with GitHub CLI
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mv ./artifacts/zw-rs-x86_64-Windows/zw-rs ./zw-rs-x86_64-windows.exe
+          mv ./artifacts/zw-rs-x86_64-Linux/zw-rs ./zw-rs-x86_64-linux
+          mv ./artifacts/zw-rs-aarch64-macOS/zw-rs ./zw-rs-aarch64-macos
+          gh release create ${{ github.ref_name }} \
+            --title "${{ github.ref_name }}" \
+            --notes-file /tmp/changelog.md \
+            --draft=false \
+            --prerelease=false \
+            ./zw-rs-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
