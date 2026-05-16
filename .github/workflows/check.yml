@@ -29,3 +29,27 @@ jobs:
       - name: Clippy
         run: |
           cargo clippy --all-targets --all-features --workspace -- -D warnings
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-unknown-linux-gnu
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
+          cache-all-crates: "true"
+
+      - name: Format
+        run: |
+          cargo fmt --all --check
