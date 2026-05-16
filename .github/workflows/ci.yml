@@ -57,3 +57,27 @@ jobs:
         with:
           name: zw-rs-${{ matrix.arch }}-${{ matrix.name }}
           path: "./target/${{ matrix.target }}/release/zw-rs"
+
+  telegram:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    name: Upload to Telegram
+    needs: run
+    runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+      COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+      COMMIT_URL: ${{ github.event.head_commit.url }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ./artifacts
+      - name: Upload to Telegram
+        run: |
+          if [ ! -z "${{ secrets.BOT_TOKEN }}" ]; then
+            mv ./artifacts/zw-rs-x86_64-Windows/zw-rs ./zw-rs-x86_64-windows.exe
+            mv ./artifacts/zw-rs-x86_64-Linux/zw-rs ./zw-rs-x86_64-linux
+            mv ./artifacts/zw-rs-aarch64-macOS/zw-rs ./zw-rs-aarch64-macos
+            ESCAPED=`python3 -c 'import json,os,urllib.parse; msg = json.dumps(os.environ["COMMIT_MESSAGE"]); print(urllib.parse.quote(msg if len(msg) <= 1024 else json.dumps(os.environ["COMMIT_URL"])))'`
+            curl -v "https://api.telegram.org/bot${BOT_TOKEN}/sendMediaGroup?chat_id=${CHANNEL_ID}&media=%5B%7B%22type%22%3A%22document%22%2C%20%22media%22%3A%22attach%3A%2F%2Fwindows%22%7D%2C%7B%22type%22%3A%22document%22%2C%20%22media%22%3A%22attach%3A%2F%2Flinux%22%7D%2C%7B%22type%22%3A%22document%22%2C%20%22media%22%3A%22attach%3A%2F%2Fmacos%22%2C%22caption%22:${ESCAPED}%7D%5D" -F windows="@./zw-rs-x86_64-windows.exe" -F linux="@./zw-rs-x86_64-linux" -F macos="@./zw-rs-aarch64-macos"
+          fi
