@@ -207,9 +207,11 @@ pub async fn handle_zw(
         .reply_parameters(ReplyParameters::new(msg.id))
         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
         .await?;
-    bot.send_message(UserId(target_user_id as u64), text)
-        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-        .await?;
+    if !any_in_cd {
+        bot.send_message(UserId(target_user_id as u64), text)
+            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+            .await?;
+    }
 
     Ok(())
 }
@@ -434,7 +436,7 @@ pub async fn process_zw_help_for_user(
     initiator_name: &str,
     target_id: i64,
     target_username: &str,
-) -> Result<String, Box<dyn Error + Send + Sync>> {
+) -> Result<(String, bool), Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,
         "process_zw_help_for_user",
@@ -510,7 +512,7 @@ pub async fn process_zw_help_for_user(
     if any_in_cd {
         let initiator_rank = get_rank(pool, initiator_id).await.unwrap_or(0);
         let target_rank = get_rank(pool, target_id).await.unwrap_or(0);
-        return Ok(format!(
+        return Ok((format!(
             "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
 发起者：{}\n\
 次数：{}次\n\
@@ -527,7 +529,7 @@ pub async fn process_zw_help_for_user(
             target_count,
             target_rank,
             cd_messages.join("\n")
-        ));
+        ), false));
     }
 
     // Update both users
@@ -566,5 +568,5 @@ pub async fn process_zw_help_for_user(
         target_rank
     );
 
-    Ok(text)
+    Ok((text, true))
 }
