@@ -8,6 +8,139 @@ use log::Level;
 use sqlx::{Row, SqlitePool};
 use std::error::Error;
 
+const CURRENT_DB_VERSION: i32 = 1;
+
+pub async fn init_database(pool: &SqlitePool) {
+    // Ensure db_version table exists
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS db_version (
+            version INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("Failed to create db_version table");
+
+    // Read current version
+    let current_version: Option<i32> = sqlx::query("SELECT version FROM db_version")
+        .fetch_optional(pool)
+        .await
+        .expect("Failed to query db_version")
+        .map(|row| row.get("version"));
+
+    let version = match current_version {
+        Some(v) => {
+            if v > CURRENT_DB_VERSION {
+                log(
+                    Level::Error,
+                    "init_database",
+                    &format!(
+                        "Database version ({}) is higher than expected ({}), please upgrade the program",
+                        v, CURRENT_DB_VERSION
+                    ),
+                );
+                panic!(
+                    "Database version ({}) is higher than expected ({}), please upgrade the program",
+                    v, CURRENT_DB_VERSION
+                );
+            }
+            v
+        }
+        None => {
+            let users_exists =
+                sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+                    .fetch_optional(pool)
+                    .await
+                    .expect("Failed to check users table")
+                    .is_some();
+
+            if users_exists {
+                log(
+                    Level::Info,
+                    "init_database",
+                    "Detected legacy database (v0), inserting version and starting migration",
+                );
+                sqlx::query("INSERT INTO db_version (version) VALUES (0)")
+                    .execute(pool)
+                    .await
+                    .expect("Failed to insert initial version");
+                0
+            } else {
+                log(
+                    Level::Info,
+                    "init_database",
+                    "Detected fresh database, creating tables and setting version",
+                );
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY,
+                        user_id INTEGER UNIQUE,
+                        username TEXT,
+                        count INTEGER DEFAULT 0,
+                        last_time DATETIME,
+                        is_admin BOOLEAN DEFAULT 0
+                    )",
+                )
+                .execute(pool)
+                .await
+                .expect("Failed to create users table");
+                sqlx::query("INSERT INTO db_version (version) VALUES (?)")
+                    .bind(CURRENT_DB_VERSION)
+                    .execute(pool)
+                    .await
+                    .expect("Failed to insert version");
+                log(
+                    Level::Info,
+                    "init_database",
+                    &format!("Database initialized at version {}", CURRENT_DB_VERSION),
+                );
+                return;
+            }
+        }
+    };
+
+    // Auto-migrate to latest version
+    if version < CURRENT_DB_VERSION {
+        upgrade_database(pool, version).await;
+    } else {
+        log(
+            Level::Info,
+            "init_database",
+            &format!("Database version: {}, already up to date", version),
+        );
+    }
+}
+
+/// Migrate from the given version up to CURRENT_DB_VERSION
+async fn upgrade_database(pool: &SqlitePool, from_version: i32) {
+    let mut v = from_version;
+
+    // v0 -> v1: add is_admin column
+    if v == 0 {
+        log(
+            Level::Info,
+            "init_database",
+            "Running migration v0 -> v1: adding is_admin column",
+        );
+        sqlx::query("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
+            .execute(pool)
+            .await
+            .expect("Failed to add is_admin column");
+        v = 1;
+    }
+
+    sqlx::query("UPDATE db_version SET version = ?")
+        .bind(v)
+        .execute(pool)
+        .await
+        .expect("Failed to update db_version");
+    log(
+        Level::Info,
+        "init_database",
+        &format!("Database migration complete: {} -> {}", from_version, v),
+    );
+}
+
 pub async fn upsert_user<'a, E>(
     pool: E,
     user_id: i64,
@@ -106,8 +239,6 @@ pub async fn get_rank(
     Ok(final_rank)
 }
 
-/// Get user count and last_time by user_id
-/// Returns (count, last_time)
 pub async fn get_user_count_and_last_time(
     pool: &SqlitePool,
     user_id: i64,

@@ -13,6 +13,7 @@ use log::Level;
 use sqlx::SqlitePool;
 use std::env;
 use teloxide::prelude::*;
+use utils::db::init_database;
 use utils::logger::log;
 
 #[tokio::main]
@@ -49,21 +50,8 @@ async fn main() {
         "Database connected successfully",
     );
 
-    // Create table if not exists
-    log(Level::Debug, "ZWBotDaemon", "Creating table if not exists");
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            user_id INTEGER UNIQUE,
-            username TEXT,
-            count INTEGER DEFAULT 0,
-            last_time DATETIME
-        )",
-    )
-    .execute(&pool)
-    .await
-    .expect("Failed to create table");
-    log(Level::Info, "ZWBotDaemon", "Table initialization complete");
+    // 初始化数据库（创建表、版本检查、自动升级）
+    init_database(&pool).await;
 
     let handler = dptree::entry()
         .branch(
