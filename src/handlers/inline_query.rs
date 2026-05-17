@@ -30,7 +30,8 @@ pub async fn inline_query_handler(
 
     // Extract page from query if it's a number and not a user_id
     let rank_page = if !query.is_empty() {
-        query.parse::<usize>()
+        query
+            .parse::<usize>()
             .ok()
             .map(|p| if p > 0 { p - 1 } else { 0 })
             .unwrap_or(0)
@@ -91,7 +92,8 @@ pub async fn inline_query_handler(
 
     // Extract page from query if it's a number and not a user_id
     let rank_page = if !query.is_empty() {
-        query.parse::<usize>()
+        query
+            .parse::<usize>()
             .ok()
             .map(|p| if p > 0 { p - 1 } else { 0 })
             .unwrap_or(0)
