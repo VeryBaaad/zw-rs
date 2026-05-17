@@ -141,6 +141,48 @@ async fn upgrade_database(pool: &SqlitePool, from_version: i32) {
     );
 }
 
+/// Check if a user is an admin
+pub async fn is_admin(pool: &SqlitePool, user_id: i64) -> Result<bool, sqlx::Error> {
+    sqlx::query("SELECT is_admin FROM users WHERE user_id = ?")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .map(|row| row.is_some_and(|r| r.get("is_admin")))
+}
+
+/// Set a user's count
+pub async fn set_user_count(
+    pool: &SqlitePool,
+    user_id: i64,
+    count: i64,
+) -> Result<(), sqlx::Error> {
+    log(
+        Level::Info,
+        "set_user_count",
+        &format!("Setting user {} count to {}", user_id, count),
+    );
+    sqlx::query("UPDATE users SET count = ? WHERE user_id = ?")
+        .bind(count)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Delete a user from the table
+pub async fn delete_user(pool: &SqlitePool, user_id: i64) -> Result<(), sqlx::Error> {
+    log(
+        Level::Info,
+        "delete_user",
+        &format!("Deleting user {}", user_id),
+    );
+    sqlx::query("DELETE FROM users WHERE user_id = ?")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn upsert_user<'a, E>(
     pool: E,
     user_id: i64,
