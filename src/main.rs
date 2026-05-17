@@ -50,7 +50,7 @@ async fn main() {
         "Database connected successfully",
     );
 
-    // 初始化数据库（创建表、版本检查、自动升级）
+    // init the database (create tables if not exist)
     init_database(&pool).await;
 
     let handler = dptree::entry()
