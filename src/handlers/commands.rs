@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::services::{handle_rank, handle_zw};
+use crate::utils::db::{delete_user, is_admin, set_user_count};
 use crate::utils::logger::log;
 use log::Level;
 use sqlx::SqlitePool;
@@ -15,6 +16,8 @@ pub enum Command {
     Zw(String),
     Rank(String),
     Version,
+    Set(String),
+    Reset(String),
 }
 
 pub async fn commands_handler(
@@ -67,6 +70,59 @@ pub async fn commands_handler(
         Command::Version => {
             let version_info = get_version_info().await?;
             bot.send_message(msg.chat.id, version_info).await?;
+        }
+        Command::Set(arg) => {
+            if let Some(user) = msg.from {
+                if !is_admin(&pool, user.id.0 as i64).await.unwrap_or(false) {
+                    bot.send_message(msg.chat.id, "Permission denied.").await?;
+                    return Ok(());
+                }
+                let parts: Vec<&str> = arg.split_whitespace().collect();
+                if parts.len() != 2 {
+                    bot.send_message(msg.chat.id, "Usage: /set <user_id> <count>")
+                        .await?;
+                    return Ok(());
+                }
+                let target_id: i64 = match parts[0].parse() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        bot.send_message(msg.chat.id, "Invalid user ID.").await?;
+                        return Ok(());
+                    }
+                };
+                let count: i64 = match parts[1].parse() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        bot.send_message(msg.chat.id, "Invalid count.").await?;
+                        return Ok(());
+                    }
+                };
+                set_user_count(&pool, target_id, count).await?;
+                bot.send_message(
+                    msg.chat.id,
+                    format!("User {} count set to {}.", target_id, count),
+                )
+                .await?;
+            }
+        }
+        Command::Reset(arg) => {
+            if let Some(user) = msg.from {
+                if !is_admin(&pool, user.id.0 as i64).await.unwrap_or(false) {
+                    bot.send_message(msg.chat.id, "Permission denied.").await?;
+                    return Ok(());
+                }
+                let target_id: i64 = match arg.trim().parse() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        bot.send_message(msg.chat.id, "Usage: /reset <user_id>")
+                            .await?;
+                        return Ok(());
+                    }
+                };
+                delete_user(&pool, target_id).await?;
+                bot.send_message(msg.chat.id, format!("User {} removed.", target_id))
+                    .await?;
+            }
         }
     }
     Ok(())
