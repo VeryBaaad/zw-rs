@@ -152,9 +152,9 @@ pub async fn inline_query_handler(
     .description("查看当前Bot版本");
     results.push(InlineQueryResult::Article(version_article));
 
-    if !query.is_empty() {
-        if let Ok(user_id) = query.parse::<i64>() {
-            if user_exists(&pool, user_id).await? {
+    if !query.is_empty()
+        && let Ok(user_id) = query.parse::<i64>()
+            && user_exists(&pool, user_id).await? {
                 let initiator_id = q.from.id.0 as i64;
                 let mut kb = teloxide::types::InlineKeyboardMarkup::default();
                 kb.inline_keyboard
@@ -174,9 +174,7 @@ pub async fn inline_query_handler(
                 )
                 .reply_markup(kb);
                 results.push(InlineQueryResult::Article(art));
-            }
         }
-    }
 
     if let Err(e) = bot
         .answer_inline_query(q.id, results)
