@@ -154,27 +154,28 @@ pub async fn inline_query_handler(
 
     if !query.is_empty()
         && let Ok(user_id) = query.parse::<i64>()
-            && user_exists(&pool, user_id).await? {
-                let initiator_id = q.from.id.0 as i64;
-                let mut kb = teloxide::types::InlineKeyboardMarkup::default();
-                kb.inline_keyboard
-                    .push(vec![teloxide::types::InlineKeyboardButton::callback(
-                        "自慰 (目标)",
-                        format!("zw_user_{}_{}", user_id, initiator_id),
-                    )]);
-                let art = InlineQueryResultArticle::new(
-                    format!("zw_user_{}_{}", user_id, initiator_id),
-                    format!("自慰 {}", user_id),
-                    InputMessageContent::Text(teloxide::types::InputMessageContentText {
-                        message_text: format!("对用户 {} 的操作", user_id),
-                        parse_mode: None,
-                        entities: None,
-                        link_preview_options: None,
-                    }),
-                )
-                .reply_markup(kb);
-                results.push(InlineQueryResult::Article(art));
-        }
+        && user_exists(&pool, user_id).await?
+    {
+        let initiator_id = q.from.id.0 as i64;
+        let mut kb = teloxide::types::InlineKeyboardMarkup::default();
+        kb.inline_keyboard
+            .push(vec![teloxide::types::InlineKeyboardButton::callback(
+                "自慰 (目标)",
+                format!("zw_user_{}_{}", user_id, initiator_id),
+            )]);
+        let art = InlineQueryResultArticle::new(
+            format!("zw_user_{}_{}", user_id, initiator_id),
+            format!("自慰 {}", user_id),
+            InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                message_text: format!("对用户 {} 的操作", user_id),
+                parse_mode: None,
+                entities: None,
+                link_preview_options: None,
+            }),
+        )
+        .reply_markup(kb);
+        results.push(InlineQueryResult::Article(art));
+    }
 
     if let Err(e) = bot
         .answer_inline_query(q.id, results)
