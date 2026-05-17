@@ -28,6 +28,17 @@ pub async fn inline_query_handler(
     let query = q.query.trim();
     let mut results: Vec<InlineQueryResult> = Vec::new();
 
+    // Extract page from query if it's a number and not a user_id
+    let rank_page = if !query.is_empty() {
+        query
+            .parse::<usize>()
+            .ok()
+            .map(|p| if p > 0 { p - 1 } else { 0 })
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
     // Generate rank text and keyboard
     let rank_text = async {
         match async {
@@ -35,7 +46,7 @@ pub async fn inline_query_handler(
                 Ok(t) => t as usize,
                 Err(e) => return Err::<String, Box<dyn Error + Send + Sync>>(e),
             };
-            let (_valid_page, offset) = calculate_page_info(total, 0);
+            let (_valid_page, offset) = calculate_page_info(total, rank_page);
             let rows = sqlx::query(
                 "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
             )
@@ -79,6 +90,17 @@ pub async fn inline_query_handler(
     .reply_markup(zw_kb);
     results.push(InlineQueryResult::Article(zw_article));
 
+    // Extract page from query if it's a number and not a user_id
+    let rank_page = if !query.is_empty() {
+        query
+            .parse::<usize>()
+            .ok()
+            .map(|p| if p > 0 { p - 1 } else { 0 })
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
     let rank_keyboard = {
         let total = match get_total_users(&pool).await {
             Ok(t) => t as usize,
@@ -91,7 +113,7 @@ pub async fn inline_query_handler(
                 0
             }
         };
-        build_rank_keyboard(0, total)
+        build_rank_keyboard(rank_page, total)
     };
     let rank_article = InlineQueryResultArticle::new(
         format!("rank_{}", chrono::Utc::now().timestamp_millis()),
@@ -130,46 +152,29 @@ pub async fn inline_query_handler(
     .description("查看当前Bot版本");
     results.push(InlineQueryResult::Article(version_article));
 
-    if !query.is_empty() {
-        if let Ok(user_id) = query.parse::<i64>() {
-            if user_exists(&pool, user_id).await? {
-                let initiator_id = q.from.id.0 as i64;
-                let mut kb = teloxide::types::InlineKeyboardMarkup::default();
-                kb.inline_keyboard
-                    .push(vec![teloxide::types::InlineKeyboardButton::callback(
-                        "自慰 (目标)",
-                        format!("zw_user_{}_{}", user_id, initiator_id),
-                    )]);
-                let art = InlineQueryResultArticle::new(
-                    format!("zw_user_{}_{}", user_id, initiator_id),
-                    format!("自慰 {}", user_id),
-                    InputMessageContent::Text(teloxide::types::InputMessageContentText {
-                        message_text: format!("对用户 {} 的操作", user_id),
-                        parse_mode: None,
-                        entities: None,
-                        link_preview_options: None,
-                    }),
-                )
-                .reply_markup(kb);
-                results.push(InlineQueryResult::Article(art));
-            }
-        } else if let Ok(page) = query.parse::<usize>() {
-            let total = get_total_users(&pool).await? as usize;
-            let (valid_page, _offset) = calculate_page_info(total, page);
-            let rk = build_rank_keyboard(valid_page, total);
-            let art = InlineQueryResultArticle::new(
-                format!("rank_{}", valid_page),
-                format!("排行榜 第{}页", valid_page + 1),
-                InputMessageContent::Text(teloxide::types::InputMessageContentText {
-                    message_text: format!("排行榜 第{}页", valid_page + 1),
-                    parse_mode: None,
-                    entities: None,
-                    link_preview_options: None,
-                }),
-            )
-            .reply_markup(rk);
-            results.push(InlineQueryResult::Article(art));
-        }
+    if !query.is_empty()
+        && let Ok(user_id) = query.parse::<i64>()
+        && user_exists(&pool, user_id).await?
+    {
+        let initiator_id = q.from.id.0 as i64;
+        let mut kb = teloxide::types::InlineKeyboardMarkup::default();
+        kb.inline_keyboard
+            .push(vec![teloxide::types::InlineKeyboardButton::callback(
+                "自慰 (目标)",
+                format!("zw_user_{}_{}", user_id, initiator_id),
+            )]);
+        let art = InlineQueryResultArticle::new(
+            format!("zw_user_{}_{}", user_id, initiator_id),
+            format!("自慰 {}", user_id),
+            InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                message_text: format!("对用户 {} 的操作", user_id),
+                parse_mode: None,
+                entities: None,
+                link_preview_options: None,
+            }),
+        )
+        .reply_markup(kb);
+        results.push(InlineQueryResult::Article(art));
     }
 
     if let Err(e) = bot
