@@ -4,16 +4,20 @@
  */
 use crate::handlers::commands::get_version_info;
 use crate::services::{build_rank_keyboard, build_rank_text, calculate_page_info};
+use crate::utils::db::ban_status;
 use crate::utils::get_total_users;
 use crate::utils::logger::log;
 use crate::utils::user_exists;
 use log::Level;
+use rand::RngExt;
+use rand::rng;
 use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::{
     prelude::*,
     types::{InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent},
 };
+use tokio::time::{Duration, sleep};
 
 pub async fn inline_query_handler(
     bot: Bot,
@@ -28,6 +32,34 @@ pub async fn inline_query_handler(
     let query = q.query.trim();
     let mut results: Vec<InlineQueryResult> = Vec::new();
 
+    // when banned
+    if ban_status(&pool, q.from.id.0 as i64).await? == 1 {
+        let ban_article = InlineQueryResultArticle::new(
+            "banned",
+            "You have been permanently banned",
+            InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                message_text: "You have been permanently banned\n您已被永久封禁".to_string(),
+                parse_mode: None,
+                entities: None,
+                link_preview_options: None,
+            }),
+        )
+        .description("您已被永久封禁");
+        results.push(InlineQueryResult::Article(ban_article));
+        if let Err(e) = bot
+            .answer_inline_query(q.id, results)
+            .is_personal(true)
+            .cache_time(0)
+            .await
+        {
+            log(
+                Level::Error,
+                "inline_query_handler",
+                &format!("Failed to answer inline query(banned): {}", e),
+            );
+        }
+        return Ok(());
+    }
     // Extract page from query if it's a number and not a user_id
     let rank_page = if !query.is_empty() {
         query
@@ -175,6 +207,11 @@ pub async fn inline_query_handler(
         )
         .reply_markup(kb);
         results.push(InlineQueryResult::Article(art));
+    }
+
+    if ban_status(&pool, q.from.id.0 as i64).await? == 2 {
+        let millis: u64 = rng().random_range(3000..=10000);
+        sleep(Duration::from_millis(millis)).await;
     }
 
     if let Err(e) = bot
