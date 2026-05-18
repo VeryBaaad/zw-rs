@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::services::{handle_rank, handle_zw};
-use crate::utils::db::{delete_user, is_admin, set_user_count};
+use crate::utils::db::{ban_status, delete_user, is_admin, set_user_count};
 use crate::utils::logger::log;
 use log::Level;
 use sqlx::SqlitePool;
 use std::error::Error;
+use teloxide::types::ReplyParameters;
 use teloxide::{prelude::*, utils::command::BotCommands};
 
 #[derive(BotCommands, Clone, Debug)]
@@ -31,6 +32,24 @@ pub async fn commands_handler(
         "commands_handler",
         &format!("Received command: {:?}", cmd),
     );
+    if ban_status(&pool, msg.from.as_ref().map_or(0, |u| u.id.0 as i64)).await? == 1 {
+        log(
+            Level::Info,
+            "commands_handler",
+            &format!(
+                "User {} is banned and attempted to use command: {:?}",
+                msg.from.as_ref().map_or(0, |u| u.id.0),
+                cmd
+            ),
+        );
+        bot.send_message(
+            msg.chat.id,
+            "You have been permanently banned\n您已被永久封禁",
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
+        return Ok(());
+    }
     match cmd {
         Command::Zw(arg) => {
             let arg = arg.trim();

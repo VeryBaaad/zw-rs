@@ -4,6 +4,7 @@
  */
 use crate::handlers::commands::get_version_info;
 use crate::services::{build_rank_keyboard, build_rank_text, calculate_page_info};
+use crate::utils::db::ban_status;
 use crate::utils::get_total_users;
 use crate::utils::logger::log;
 use crate::utils::user_exists;
@@ -28,6 +29,21 @@ pub async fn inline_query_handler(
     let query = q.query.trim();
     let mut results: Vec<InlineQueryResult> = Vec::new();
 
+    // when banned
+    if ban_status(&pool, q.from.id.0 as i64).await? == 1 {
+        let ban_article = InlineQueryResultArticle::new(
+            "banned",
+            "You have been permanently banned",
+            InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                message_text: "You have been permanently banned\n您已被永久封禁".to_string(),
+                parse_mode: None,
+                entities: None,
+                link_preview_options: None,
+            }),
+        )
+        .description("您已被永久封禁");
+        results.push(InlineQueryResult::Article(ban_article));
+    }
     // Extract page from query if it's a number and not a user_id
     let rank_page = if !query.is_empty() {
         query

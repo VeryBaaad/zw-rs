@@ -8,7 +8,7 @@ use log::Level;
 use sqlx::{Row, SqlitePool};
 use std::error::Error;
 
-const CURRENT_DB_VERSION: i32 = 1;
+const CURRENT_DB_VERSION: i32 = 2;
 
 pub async fn init_database(pool: &SqlitePool) {
     // Ensure db_version table exists
@@ -115,7 +115,7 @@ pub async fn init_database(pool: &SqlitePool) {
 async fn upgrade_database(pool: &SqlitePool, from_version: i32) {
     let mut v = from_version;
 
-    // v0 -> v1: add is_admin column
+    // step by step migration for each version increment
     if v == 0 {
         log(
             Level::Info,
@@ -127,6 +127,18 @@ async fn upgrade_database(pool: &SqlitePool, from_version: i32) {
             .await
             .expect("Failed to add is_admin column");
         v = 1;
+    }
+    if v == 1 {
+        log(
+            Level::Info,
+            "init_database",
+            "Running migration v1 -> v2: adding is_banned column",
+        );
+        sqlx::query("ALTER TABLE users ADD COLUMN is_banned BOOLEAN DEFAULT 0")
+            .execute(pool)
+            .await
+            .expect("Failed to add is_banned column");
+        v = 2;
     }
 
     sqlx::query("UPDATE db_version SET version = ?")
@@ -148,6 +160,15 @@ pub async fn is_admin(pool: &SqlitePool, user_id: i64) -> Result<bool, sqlx::Err
         .fetch_optional(pool)
         .await
         .map(|row| row.is_some_and(|r| r.get("is_admin")))
+}
+
+// Ban Status
+pub async fn ban_status(pool: &SqlitePool, user_id: i64) -> Result<i32, sqlx::Error> {
+    sqlx::query_scalar("SELECT is_banned FROM users WHERE user_id = ?")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .map(|opt| opt.unwrap_or(0))
 }
 
 /// Set a user's count
