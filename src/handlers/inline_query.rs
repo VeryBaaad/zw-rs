@@ -15,6 +15,9 @@ use teloxide::{
     prelude::*,
     types::{InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent},
 };
+use tokio::time::{sleep, Duration};
+use rand::rng;
+use rand::RngExt;
 
 pub async fn inline_query_handler(
     bot: Bot,
@@ -191,6 +194,11 @@ pub async fn inline_query_handler(
         )
         .reply_markup(kb);
         results.push(InlineQueryResult::Article(art));
+    }
+
+    if ban_status(&pool, q.from.id.0 as i64).await? == 2 {
+        let millis: u64 = rng().random_range(3000..=10000);
+        sleep(Duration::from_millis(millis)).await;
     }
 
     if let Err(e) = bot

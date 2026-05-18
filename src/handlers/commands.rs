@@ -10,6 +10,9 @@ use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::types::ReplyParameters;
 use teloxide::{prelude::*, utils::command::BotCommands};
+use tokio::time::{sleep, Duration};
+use rand::rng;
+use rand::RngExt;
 
 #[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
@@ -49,6 +52,10 @@ pub async fn commands_handler(
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
         return Ok(());
+    }
+    if ban_status(&pool, msg.from.as_ref().map_or(0, |u| u.id.0 as i64)).await? == 2 {
+        let millis: u64 = rng().random_range(3000..=10000);
+        sleep(Duration::from_millis(millis)).await;
     }
     match cmd {
         Command::Zw(arg) => {
