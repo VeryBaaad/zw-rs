@@ -46,6 +46,19 @@ pub async fn inline_query_handler(
         )
         .description("您已被永久封禁");
         results.push(InlineQueryResult::Article(ban_article));
+        if let Err(e) = bot
+            .answer_inline_query(q.id, results)
+            .is_personal(true)
+            .cache_time(0)
+            .await
+        {
+            log(
+                Level::Error,
+                "inline_query_handler",
+                &format!("Failed to answer inline query(banned): {}", e),
+            );
+        }
+        return Ok(());
     }
     // Extract page from query if it's a number and not a user_id
     let rank_page = if !query.is_empty() {
