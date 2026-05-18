@@ -6,13 +6,13 @@ use crate::services::{handle_rank, handle_zw};
 use crate::utils::db::{ban_status, delete_user, is_admin, set_user_count};
 use crate::utils::logger::log;
 use log::Level;
+use rand::RngExt;
+use rand::rng;
 use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::types::ReplyParameters;
 use teloxide::{prelude::*, utils::command::BotCommands};
-use tokio::time::{sleep, Duration};
-use rand::rng;
-use rand::RngExt;
+use tokio::time::{Duration, sleep};
 
 #[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]

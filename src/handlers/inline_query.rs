@@ -9,15 +9,15 @@ use crate::utils::get_total_users;
 use crate::utils::logger::log;
 use crate::utils::user_exists;
 use log::Level;
+use rand::RngExt;
+use rand::rng;
 use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::{
     prelude::*,
     types::{InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent},
 };
-use tokio::time::{sleep, Duration};
-use rand::rng;
-use rand::RngExt;
+use tokio::time::{Duration, sleep};
 
 pub async fn inline_query_handler(
     bot: Bot,
