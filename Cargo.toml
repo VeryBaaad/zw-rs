@@ -17,6 +17,9 @@ sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls", "macro
 teloxide = { version = "0.17.0", features = ["macros"] }
 tokio = { version = "1.52.2", features = ["rt-multi-thread", "macros"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8.1"
+
 [build-dependencies]
 chrono = "0.4.44"
 

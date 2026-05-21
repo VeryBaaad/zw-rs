@@ -6,6 +6,8 @@
 mod handlers;
 mod services;
 mod utils;
+#[cfg(target_os = "windows")]
+mod windows_service;
 
 use handlers::commands::Command;
 use handlers::{callback_handler, commands_handler, inline_query_handler};
@@ -13,11 +15,41 @@ use log::Level;
 use sqlx::SqlitePool;
 use std::env;
 use teloxide::prelude::*;
+use tokio::sync::watch;
 use utils::db::init_database;
 use utils::logger::log;
 
 #[tokio::main]
 async fn main() {
+    #[cfg(target_os = "windows")]
+    {
+        match windows_service::try_run_as_service() {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(err) => {
+                log(
+                    Level::Error,
+                    "ZWBotDaemon",
+                    &format!("Failed while starting Windows service path: {err:#}"),
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+    if let Err(err) = run_bot(true, None).await {
+        log(
+            Level::Error,
+            "ZWBotDaemon",
+            &format!("Fatal startup error: {err:#}"),
+        );
+        std::process::exit(1);
+    }
+}
+
+pub async fn run_bot(
+    enable_ctrlc_handler: bool,
+    mut shutdown_rx: Option<watch::Receiver<bool>>,
+) -> anyhow::Result<()> {
     pretty_env_logger::init();
     log(
         Level::Info,
@@ -62,10 +94,25 @@ async fn main() {
         .branch(Update::filter_callback_query().endpoint(callback_handler))
         .branch(Update::filter_inline_query().endpoint(inline_query_handler));
 
-    Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![pool])
-        .enable_ctrlc_handler()
-        .build()
-        .dispatch()
-        .await;
+    let mut dispatcher = Dispatcher::builder(bot, handler).dependencies(dptree::deps![pool]);
+
+    if enable_ctrlc_handler {
+        dispatcher = dispatcher.enable_ctrlc_handler();
+    }
+
+    let mut dispatcher = dispatcher.build();
+    let shutdown_token = dispatcher.shutdown_token();
+    let dispatch_task = tokio::spawn(async move {
+        dispatcher.dispatch().await;
+    });
+
+    if let Some(rx) = shutdown_rx.as_mut()
+        && rx.changed().await.is_ok()
+        && *rx.borrow()
+    {
+        let _ = shutdown_token.shutdown();
+    }
+    let _ = dispatch_task.await;
+
+    Ok(())
 }
