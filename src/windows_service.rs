@@ -8,13 +8,14 @@
 use crate::utils::logger::log;
 use log::Level;
 use std::ffi::OsString;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::runtime::Builder;
 use tokio::sync::watch;
 use windows_service::define_windows_service;
 use windows_service::service::{
     ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
 };
+use windows_service::service_control_handler::ServiceStatusHandle;
 use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
 use windows_service::service_dispatcher;
 
@@ -63,16 +64,34 @@ fn service_main(_arguments: Vec<OsString>) {
 fn run_service() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_tx = Arc::new(shutdown_tx);
+    let status_handle_slot: Arc<Mutex<Option<ServiceStatusHandle>>> = Arc::new(Mutex::new(None));
+    let status_handle_slot_for_handler = status_handle_slot.clone();
 
     let status_handle =
         service_control_handler::register(SERVICE_NAME, move |control| match control {
             ServiceControl::Stop => {
+                if let Ok(guard) = status_handle_slot_for_handler.lock()
+                    && let Some(handle) = guard.as_ref()
+                {
+                    let _ = handle.set_service_status(ServiceStatus {
+                        service_type: ServiceType::OWN_PROCESS,
+                        current_state: ServiceState::StopPending,
+                        controls_accepted: ServiceControlAccept::empty(),
+                        exit_code: ServiceExitCode::Win32(0),
+                        checkpoint: 1,
+                        wait_hint: std::time::Duration::from_secs(30),
+                        process_id: None,
+                    });
+                }
                 let _ = shutdown_tx.send(true);
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
             _ => ServiceControlHandlerResult::NotImplemented,
         })?;
+    if let Ok(mut guard) = status_handle_slot.lock() {
+        *guard = Some(status_handle.clone());
+    }
 
     status_handle.set_service_status(ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
