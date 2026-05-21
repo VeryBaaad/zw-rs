@@ -7,7 +7,6 @@
 
 use crate::utils::logger::log;
 use log::Level;
-use std::error::Error as StdError;
 use std::ffi::OsString;
 use std::sync::Arc;
 use tokio::runtime::Builder;
