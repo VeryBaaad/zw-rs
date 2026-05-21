@@ -7,6 +7,7 @@
 
 use crate::utils::logger::log;
 use log::Level;
+use std::error::Error as StdError;
 use std::ffi::OsString;
 use std::sync::Arc;
 use tokio::runtime::Builder;
@@ -33,13 +34,21 @@ pub fn try_run_as_service() -> anyhow::Result<bool> {
         Err(err) => {
             // ERROR_FAILED_SERVICE_CONTROLLER_CONNECT (1063):
             // not launched by the Windows Service Control Manager.
-            let msg = err.to_string();
-            if msg.contains("1063") {
+            if is_scm_connect_error(&err) {
                 return Ok(false);
             }
             Err(err)
         }
     }
+}
+
+fn is_scm_connect_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::raw_os_error)
+            == Some(1063)
+    })
 }
 
 fn service_main(_arguments: Vec<OsString>) {
