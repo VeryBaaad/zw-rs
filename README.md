@@ -37,7 +37,7 @@
 2. `config.toml` 示例（可从 `docs/config.example.toml` 复制）：
    ```toml
    [bot]
-   token = "1234567890:your_bot_token_here"
+   token = "0000000000:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
    [database]
    url = "sqlite:zw.db"
