@@ -1,0 +1,7 @@
+[bot]
+# Telegram Bot Token
+token = "1234567890:your_bot_token_here"
+
+[database]
+# Optional. Defaults to sqlite:zw.db
+url = "sqlite:zw.db"

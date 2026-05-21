@@ -31,15 +31,19 @@
 
 ## 运行
 
-1. 设置环境变量：
-   - `TELOXIDE_TOKEN`: Telegram Bot Token
-   - *`DATABASE_URL`: SQLite数据库URL，例如 `sqlite:zw.db`
-   - *`TELOXIDE_API_URL`: 自定义Telegram API，例如 `https://api.telegram.org`
-   - *`TELOXIDE_PROXY`: 自定义Telegram代理
+1. 配置（优先读取 `config.toml`，其次回退环境变量）：
+   - `bot.token`（必填）→ 回退 `TELOXIDE_TOKEN`
+   - `database.url`（可选，默认 `sqlite:zw.db`）→ 回退 `DATABASE_URL`
+2. `config.toml` 示例（可从 `docs/config.example.toml` 复制）：
+   ```toml
+   [bot]
+   token = "1234567890:your_bot_token_here"
 
-> *表示非必须，即通过默认配置
+   [database]
+   url = "sqlite:zw.db"
+   ```
 
-2. 运行：
+3. 运行：
    ```bash
    cargo run
    ```

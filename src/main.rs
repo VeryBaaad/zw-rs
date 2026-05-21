@@ -13,9 +13,9 @@ use handlers::commands::Command;
 use handlers::{callback_handler, commands_handler, inline_query_handler};
 use log::Level;
 use sqlx::SqlitePool;
-use std::env;
 use teloxide::prelude::*;
 use tokio::sync::watch;
+use utils::config::load_runtime_config;
 use utils::db::init_database;
 use utils::logger::log;
 
@@ -65,9 +65,10 @@ pub async fn run_bot(
         .as_str(),
     );
 
-    let bot = Bot::from_env();
+    let config = load_runtime_config()?;
+    let bot = Bot::new(config.teloxide_token);
 
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:zw.db".to_string());
+    let database_url = config.database_url;
     log(
         Level::Info,
         "ZWBotDaemon",
