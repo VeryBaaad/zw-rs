@@ -90,7 +90,7 @@ fn run_service() -> anyhow::Result<()> {
             _ => ServiceControlHandlerResult::NotImplemented,
         })?;
     if let Ok(mut guard) = status_handle_slot.lock() {
-        *guard = Some(status_handle.clone());
+        *guard = Some(status_handle);
     }
 
     status_handle.set_service_status(ServiceStatus {
