@@ -8,6 +8,7 @@ use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::path::Path;
+use crate::utils::logger::log;
 
 const DEFAULT_DATABASE_URL: &str = "sqlite:zw.db";
 
@@ -61,6 +62,7 @@ pub fn load_runtime_config() -> Result<RuntimeConfig> {
 fn read_config_file(path: &str) -> Result<Option<FileConfig>> {
     let p = Path::new(path);
     if !p.exists() {
+        log(log::Level::Debug, "read_config", "Config file not found, using defaults and environment variables");
         return Ok(None);
     }
     let content = fs::read_to_string(p).with_context(|| format!("Failed to read {}", path))?;
