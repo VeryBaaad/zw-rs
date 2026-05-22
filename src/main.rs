@@ -9,6 +9,7 @@ mod utils;
 #[cfg(target_os = "windows")]
 mod windows_service;
 
+use anyhow::Context;
 use handlers::commands::Command;
 use handlers::{callback_handler, commands_handler, inline_query_handler};
 use log::Level;
@@ -76,7 +77,7 @@ pub async fn run_bot(
     );
     let pool = SqlitePool::connect(&database_url)
         .await
-        .expect("Failed to connect to database");
+        .with_context(|| format!("Failed to connect to database: {database_url}"))?;
     log(
         Level::Info,
         "ZWBotDaemon",

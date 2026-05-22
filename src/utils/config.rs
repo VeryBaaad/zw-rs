@@ -106,6 +106,11 @@ fn normalize_database_url(url: String) -> String {
         return url;
     }
 
+    if let Ok(current_dir) = std::env::current_dir() {
+        let absolute = current_dir.join(db_path);
+        return format!("{SQLITE_PREFIX}{}", absolute.display());
+    }
+
     if let Some(exe_dir) = executable_dir() {
         let absolute = exe_dir.join(db_path);
         return format!("{SQLITE_PREFIX}{}", absolute.display());
