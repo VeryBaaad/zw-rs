@@ -31,18 +31,40 @@
 
 ## 运行
 
-1. 设置环境变量：
-   - `TELOXIDE_TOKEN`: Telegram Bot Token
-   - *`DATABASE_URL`: SQLite数据库URL，例如 `sqlite:zw.db`
-   - *`TELOXIDE_API_URL`: 自定义Telegram API，例如 `https://api.telegram.org`
-   - *`TELOXIDE_PROXY`: 自定义Telegram代理
+1. 配置（优先读取 `config.toml`，其次回退环境变量）：
+   - `bot.token`（必填）→ 回退 `TELOXIDE_TOKEN`
+   - `database.url`（可选，默认 `sqlite:zw.db`）→ 回退 `DATABASE_URL`
+2. `config.toml` 示例（可从 `docs/config.example.toml` 复制）：
+   ```toml
+   [bot]
+   token = "0000000000:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-> *表示非必须，即通过默认配置
-
-2. 运行：
-   ```bash
-   cargo run
+   [database]
+   url = "sqlite:zw.db"
    ```
+
+3. 运行方式（二选一）：
+   - 源码运行：
+     ```bash
+     cargo run
+     ```
+   - 二进制运行：从 [Release](https://github.com/VeryBaaad/zw-rs/releases/latest) 下载对应的二进制文件
+
+4. Windows 服务方式运行（可选）：
+   1. 以管理员权限打开 PowerShell / CMD。
+   2. 安装服务(example)：
+      ```powershell
+      sc.exe create zw-rs binPath= "C:\path\to\zw-rs.exe" start= auto
+      ```
+   3. 启动服务：
+      ```powershell
+      sc.exe start zw-rs
+      ```
+   4. 停止/删除服务：
+      ```powershell
+      sc.exe stop zw-rs
+      sc.exe delete zw-rs
+      ```
 
 ## 数据库
 
