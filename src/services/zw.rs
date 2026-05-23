@@ -48,6 +48,8 @@ pub async fn handle_zw(
     }
     let (target_count, target_last_time_opt, target_username, target_user_id) =
         target_record.unwrap();
+    let initiator_display_name = markdown::escape(&initiator_name);
+    let target_display_name = markdown::escape(&target_username);
 
     let (initiator_count, initiator_last_time_opt) =
         get_user_count_and_last_time(&pool, initiator_id).await?;
@@ -60,7 +62,7 @@ pub async fn handle_zw(
         any_in_cd = true;
         cd_messages.push(format!(
             "发起者 {} 仍在冷却：{}分{}秒",
-            markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
+            markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
             initiator_cd.mins,
             initiator_cd.secs
         ));
@@ -71,7 +73,7 @@ pub async fn handle_zw(
         any_in_cd = true;
         cd_messages.push(format!(
             "另一位 {} 仍在冷却：{}分{}秒",
-            markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
+            markdown::user_mention(UserId(target_user_id as u64), target_display_name.as_str()),
             target_cd.mins,
             target_cd.secs
         ));
@@ -89,11 +91,11 @@ pub async fn handle_zw(
 次数：{}次\n\
 排行榜位置：{}\n\n\
 {}",
-            initiator_name,
-            markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
+            initiator_display_name,
+            markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
             initiator_count,
             initiator_rank,
-            markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
+            markdown::user_mention(UserId(target_user_id as u64), target_display_name.as_str()),
             target_count,
             target_rank,
             cd_messages.join("\n")
@@ -327,6 +329,8 @@ pub async fn process_zw_help_for_user(
         get_user_count_and_last_time(pool, initiator_id).await?;
     let (target_count, target_last_time_opt) =
         get_user_count_and_last_time(pool, target_id).await?;
+    let initiator_display_name = markdown::escape(initiator_name);
+    let target_display_name = markdown::escape(target_username);
 
     // CD Check
     let mut any_in_cd = false;
@@ -341,7 +345,7 @@ pub async fn process_zw_help_for_user(
             let secs = remaining.num_seconds() % 60;
             cd_messages.push(format!(
                 "发起者 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(UserId(initiator_id as u64), initiator_name),
+                markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
                 mins,
                 secs
             ));
@@ -356,7 +360,7 @@ pub async fn process_zw_help_for_user(
             let secs = remaining.num_seconds() % 60;
             cd_messages.push(format!(
                 "另一位 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(UserId(target_id as u64), target_username),
+                markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
                 mins,
                 secs
             ));
@@ -376,11 +380,11 @@ pub async fn process_zw_help_for_user(
 次数：{}次\n\
 排行榜位置：{}\n\n\
 {}",
-                initiator_name,
-                markdown::user_mention(UserId(initiator_id as u64), initiator_name),
+                initiator_display_name,
+                markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
                 initiator_count,
                 initiator_rank,
-                markdown::user_mention(UserId(target_id as u64), target_username),
+                markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
                 target_count,
                 target_rank,
                 cd_messages.join("\n")
@@ -417,8 +421,8 @@ pub async fn process_zw_help_for_user(
 您在自慰排行榜上的位置：{}\n\
 另一位在自慰排行榜上的位置：{}\n\
 下次可进行自慰的时间：30分0秒",
-        markdown::user_mention(UserId(initiator_id as u64), initiator_name),
-        markdown::user_mention(UserId(target_id as u64), target_username),
+        markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
+        markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
         new_initiator_count,
         new_target_count,
         initiator_rank,
