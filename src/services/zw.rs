@@ -345,7 +345,10 @@ pub async fn process_zw_help_for_user(
             let secs = remaining.num_seconds() % 60;
             cd_messages.push(format!(
                 "发起者 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
+                markdown::user_mention(
+                    UserId(initiator_id as u64),
+                    initiator_display_name.as_str()
+                ),
                 mins,
                 secs
             ));
@@ -381,7 +384,10 @@ pub async fn process_zw_help_for_user(
 排行榜位置：{}\n\n\
 {}",
                 initiator_display_name,
-                markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
+                markdown::user_mention(
+                    UserId(initiator_id as u64),
+                    initiator_display_name.as_str()
+                ),
                 initiator_count,
                 initiator_rank,
                 markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
