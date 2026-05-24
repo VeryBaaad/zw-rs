@@ -4,6 +4,7 @@
  */
 use crate::services::{handle_rank, handle_zw};
 use crate::utils::db::{ban_status, delete_user, is_admin, set_user_count};
+use crate::utils::fun::eunjeong_generate;
 use crate::utils::logger::log;
 use log::Level;
 use rand::RngExt;
@@ -20,6 +21,7 @@ pub enum Command {
     Zw(String),
     Rank(String),
     Version,
+    Eunjeong(String),
     Set(String),
     Reset(String),
 }
@@ -96,6 +98,15 @@ pub async fn commands_handler(
         Command::Version => {
             let version_info = get_version_info().await?;
             bot.send_message(msg.chat.id, version_info).await?;
+        }
+        Command::Eunjeong(arg) => {
+            let eunjeong_text = if arg.is_empty() {
+                eunjeong_generate(None).await
+            } else {
+                let custom_count = arg.trim().parse::<usize>().ok();
+                eunjeong_generate(custom_count).await
+            };
+            bot.send_message(msg.chat.id, eunjeong_text).await?;
         }
         Command::Set(arg) => {
             if let Some(user) = msg.from {
