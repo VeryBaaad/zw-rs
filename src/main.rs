@@ -51,7 +51,7 @@ pub async fn run_bot(
     enable_ctrlc_handler: bool,
     mut shutdown_rx: Option<watch::Receiver<bool>>,
 ) -> anyhow::Result<()> {
-    pretty_env_logger::init();
+    env_logger::init();
     log(
         Level::Info,
         "ZWBotDaemon",
