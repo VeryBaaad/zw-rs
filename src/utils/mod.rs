@@ -4,6 +4,7 @@
  */
 pub mod config;
 pub mod db;
+pub mod fun;
 pub mod logger;
 
 pub use db::*;
