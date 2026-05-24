@@ -2,8 +2,8 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
-use rand::rng;
 use rand::RngExt;
+use rand::rng;
 
 pub async fn eunjeong_generate(custom_count: Option<usize>) -> String {
     let count = match custom_count {

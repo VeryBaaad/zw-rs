@@ -5,6 +5,7 @@
 use crate::handlers::commands::get_version_info;
 use crate::services::{build_rank_keyboard, build_rank_text, calculate_page_info};
 use crate::utils::db::ban_status;
+use crate::utils::fun::eunjeong_generate;
 use crate::utils::get_total_users;
 use crate::utils::logger::log;
 use crate::utils::user_exists;
@@ -18,7 +19,6 @@ use teloxide::{
     types::{InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent},
 };
 use tokio::time::{Duration, sleep};
-use crate::utils::fun::eunjeong_generate;
 
 pub async fn inline_query_handler(
     bot: Bot,
@@ -188,7 +188,7 @@ pub async fn inline_query_handler(
     if !query.is_empty()
         && let Ok(count) = query.parse::<usize>()
     {
-        let eunjeong_text = eunjeong_generate(Some(count)).await;
+        let eunjeong_text = "恩！情！\n".to_string() + &eunjeong_generate(Some(count)).await;
         let eunjeong_article = InlineQueryResultArticle::new(
             format!("eunjeong_{}", chrono::Utc::now().timestamp_millis()),
             "恩！情！",
@@ -202,7 +202,7 @@ pub async fn inline_query_handler(
         .description("Eun! Jeong!");
         results.push(InlineQueryResult::Article(eunjeong_article));
     } else {
-        let eunjeong_text = eunjeong_generate(None).await;
+        let eunjeong_text = "恩！情！\n".to_string() + &eunjeong_generate(None).await;
         let eunjeong_article = InlineQueryResultArticle::new(
             format!("eunjeong_{}", chrono::Utc::now().timestamp_millis()),
             "恩！情！",
