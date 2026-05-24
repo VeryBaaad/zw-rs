@@ -18,6 +18,7 @@ use teloxide::{
     types::{InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent},
 };
 use tokio::time::{Duration, sleep};
+use crate::utils::fun::eunjeong_generate;
 
 pub async fn inline_query_handler(
     bot: Bot,
@@ -183,6 +184,38 @@ pub async fn inline_query_handler(
     )
     .description("查看当前Bot版本");
     results.push(InlineQueryResult::Article(version_article));
+
+    if !query.is_empty()
+        && let Ok(count) = query.parse::<usize>()
+    {
+        let eunjeong_text = eunjeong_generate(Some(count)).await;
+        let eunjeong_article = InlineQueryResultArticle::new(
+            format!("eunjeong_{}", chrono::Utc::now().timestamp_millis()),
+            "恩！情！",
+            InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                message_text: eunjeong_text,
+                parse_mode: None,
+                entities: None,
+                link_preview_options: None,
+            }),
+        )
+        .description("Eun! Jeong!");
+        results.push(InlineQueryResult::Article(eunjeong_article));
+    } else {
+        let eunjeong_text = eunjeong_generate(None).await;
+        let eunjeong_article = InlineQueryResultArticle::new(
+            format!("eunjeong_{}", chrono::Utc::now().timestamp_millis()),
+            "恩！情！",
+            InputMessageContent::Text(teloxide::types::InputMessageContentText {
+                message_text: eunjeong_text,
+                parse_mode: None,
+                entities: None,
+                link_preview_options: None,
+            }),
+        )
+        .description("Eun! Jeong!");
+        results.push(InlineQueryResult::Article(eunjeong_article));
+    }
 
     if !query.is_empty()
         && let Ok(user_id) = query.parse::<i64>()
