@@ -187,6 +187,7 @@ pub async fn inline_query_handler(
 
     if !query.is_empty()
         && let Ok(count) = query.parse::<usize>()
+        && count <= 100
     {
         let eunjeong_text = "恩！情！\n".to_string() + &eunjeong_generate(Some(count)).await;
         let eunjeong_article = InlineQueryResultArticle::new(

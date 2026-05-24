@@ -104,7 +104,11 @@ pub async fn commands_handler(
                 eunjeong_generate(None).await
             } else {
                 let custom_count = arg.trim().parse::<usize>().ok();
-                eunjeong_generate(custom_count).await
+                if custom_count <= Some(100) {
+                    eunjeong_generate(custom_count).await
+                } else {
+                    eunjeong_generate(None).await
+                }
             };
             bot.send_message(msg.chat.id, eunjeong_text).await?;
         }
