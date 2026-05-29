@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::services::{handle_rank, handle_zw};
+use crate::utils::DbPool;
+use crate::utils::config::DatabaseKind;
 use crate::utils::db::{ban_status, delete_user, is_admin, set_user_count};
 use crate::utils::fun::eunjeong_generate;
 use crate::utils::logger::log;
 use log::Level;
 use rand::RngExt;
 use rand::rng;
-use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::types::ReplyParameters;
 use teloxide::{prelude::*, utils::command::BotCommands};
@@ -30,7 +31,8 @@ pub async fn commands_handler(
     bot: Bot,
     msg: Message,
     cmd: Command,
-    pool: SqlitePool,
+    pool: DbPool,
+    database_kind: DatabaseKind,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(
         Level::Info,
@@ -68,14 +70,14 @@ pub async fn commands_handler(
                     "commands_handler",
                     "No argument provided for zw command, treating as empty",
                 );
-                handle_zw(bot, msg, pool, None).await?
+                handle_zw(bot, msg, pool, database_kind, None).await?
             } else {
                 log(
                     Level::Debug,
                     "commands_handler",
                     &format!("Received argument for zw command: '{}'", arg),
                 );
-                handle_zw(bot, msg, pool, Some(arg.to_string())).await?
+                handle_zw(bot, msg, pool, database_kind, Some(arg.to_string())).await?
             }
         }
         Command::Rank(arg) => {

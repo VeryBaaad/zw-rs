@@ -2,16 +2,117 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
+use crate::utils::DbPool;
+use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
-use chrono::{Duration, Utc};
+use chrono::Duration;
 use log::Level;
-use sqlx::{Row, SqlitePool};
+use sqlx::{Any, Row};
 use std::error::Error;
 
-const CURRENT_DB_VERSION: i32 = 2;
+const CURRENT_DB_VERSION: i32 = 3;
 
-pub async fn init_database(pool: &SqlitePool) {
-    // Ensure db_version table exists
+fn users_table_exists_sql(kind: DatabaseKind) -> &'static str {
+    match kind {
+        DatabaseKind::Sqlite => "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        DatabaseKind::Postgres => {
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?"
+        }
+        DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?"
+        }
+    }
+}
+
+fn users_table_ddl(kind: DatabaseKind) -> &'static str {
+    match kind {
+        DatabaseKind::Sqlite => {
+            "CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER NOT NULL UNIQUE,
+                username TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                last_time BIGINT NOT NULL DEFAULT 0,
+                is_admin BOOLEAN NOT NULL DEFAULT 0,
+                is_banned INTEGER NOT NULL DEFAULT 0
+            )"
+        }
+        DatabaseKind::Postgres => {
+            "CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT NOT NULL UNIQUE,
+                username TEXT NOT NULL,
+                count BIGINT NOT NULL DEFAULT 0,
+                last_time BIGINT NOT NULL DEFAULT 0,
+                is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+                is_banned INTEGER NOT NULL DEFAULT 0
+            )"
+        }
+        DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT NOT NULL UNIQUE,
+                username TEXT NOT NULL,
+                count BIGINT NOT NULL DEFAULT 0,
+                last_time BIGINT NOT NULL DEFAULT 0,
+                is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+                is_banned INTEGER NOT NULL DEFAULT 0
+            )"
+        }
+    }
+}
+
+fn add_is_admin_sql(kind: DatabaseKind) -> &'static str {
+    match kind {
+        DatabaseKind::Sqlite => "ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0",
+        DatabaseKind::Postgres | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"
+        }
+    }
+}
+
+fn add_is_banned_sql(kind: DatabaseKind) -> &'static str {
+    match kind {
+        DatabaseKind::Sqlite
+        | DatabaseKind::Postgres
+        | DatabaseKind::MySql
+        | DatabaseKind::MariaDb => {
+            "ALTER TABLE users ADD COLUMN is_banned INTEGER NOT NULL DEFAULT 0"
+        }
+    }
+}
+
+fn upsert_user_sql(kind: DatabaseKind) -> &'static str {
+    match kind {
+        DatabaseKind::Sqlite | DatabaseKind::Postgres => {
+            "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
+             ON CONFLICT(user_id) DO UPDATE SET
+             username = excluded.username,
+             count = excluded.count,
+             last_time = excluded.last_time"
+        }
+        DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+             username = VALUES(username),
+             count = VALUES(count),
+             last_time = VALUES(last_time)"
+        }
+    }
+}
+
+fn get_rank_sql(kind: DatabaseKind) -> &'static str {
+    match kind {
+        DatabaseKind::Sqlite => {
+            "SELECT COUNT(*) as user_rank FROM users WHERE count > (SELECT count FROM users WHERE user_id = ?) OR (count = (SELECT count FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
+        }
+        DatabaseKind::Postgres => {
+            "SELECT COUNT(*) as user_rank FROM users WHERE \"count\" > (SELECT \"count\" FROM users WHERE user_id = ?) OR (\"count\" = (SELECT \"count\" FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
+        }
+        DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "SELECT COUNT(*) as `user_rank` FROM users WHERE `count` > (SELECT `count` FROM users WHERE user_id = ?) OR (`count` = (SELECT `count` FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
+        }
+    }
+}
+
+pub async fn init_database(pool: &DbPool, database_kind: DatabaseKind) {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS db_version (
             version INTEGER NOT NULL
@@ -21,7 +122,6 @@ pub async fn init_database(pool: &SqlitePool) {
     .await
     .expect("Failed to create db_version table");
 
-    // Read current version
     let current_version: Option<i32> = sqlx::query("SELECT version FROM db_version")
         .fetch_optional(pool)
         .await
@@ -47,12 +147,12 @@ pub async fn init_database(pool: &SqlitePool) {
             v
         }
         None => {
-            let users_exists =
-                sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-                    .fetch_optional(pool)
-                    .await
-                    .expect("Failed to check users table")
-                    .is_some();
+            let users_exists = sqlx::query(users_table_exists_sql(database_kind))
+                .bind("users")
+                .fetch_optional(pool)
+                .await
+                .expect("Failed to check users table")
+                .is_some();
 
             if users_exists {
                 log(
@@ -71,19 +171,10 @@ pub async fn init_database(pool: &SqlitePool) {
                     "init_database",
                     "Detected fresh database, creating tables and setting version",
                 );
-                sqlx::query(
-                    "CREATE TABLE IF NOT EXISTS users (
-                        id INTEGER PRIMARY KEY,
-                        user_id INTEGER UNIQUE,
-                        username TEXT,
-                        count INTEGER DEFAULT 0,
-                        last_time DATETIME,
-                        is_admin BOOLEAN DEFAULT 0
-                    )",
-                )
-                .execute(pool)
-                .await
-                .expect("Failed to create users table");
+                sqlx::query(users_table_ddl(database_kind))
+                    .execute(pool)
+                    .await
+                    .expect("Failed to create users table");
                 sqlx::query("INSERT INTO db_version (version) VALUES (?)")
                     .bind(CURRENT_DB_VERSION)
                     .execute(pool)
@@ -99,9 +190,8 @@ pub async fn init_database(pool: &SqlitePool) {
         }
     };
 
-    // Auto-migrate to latest version
     if version < CURRENT_DB_VERSION {
-        upgrade_database(pool, version).await;
+        upgrade_database(pool, version, database_kind).await;
     } else {
         log(
             Level::Info,
@@ -109,20 +199,23 @@ pub async fn init_database(pool: &SqlitePool) {
             &format!("Database version: {}, already up to date", version),
         );
     }
+
+    repair_null_last_time(pool)
+        .await
+        .expect("Failed to backfill null last_time values");
 }
 
 /// Migrate from the given version up to CURRENT_DB_VERSION
-async fn upgrade_database(pool: &SqlitePool, from_version: i32) {
+async fn upgrade_database(pool: &DbPool, from_version: i32, database_kind: DatabaseKind) {
     let mut v = from_version;
 
-    // step by step migration for each version increment
     if v == 0 {
         log(
             Level::Info,
             "init_database",
             "Running migration v0 -> v1: adding is_admin column",
         );
-        sqlx::query("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
+        sqlx::query(add_is_admin_sql(database_kind))
             .execute(pool)
             .await
             .expect("Failed to add is_admin column");
@@ -134,11 +227,34 @@ async fn upgrade_database(pool: &SqlitePool, from_version: i32) {
             "init_database",
             "Running migration v1 -> v2: adding is_banned column",
         );
-        sqlx::query("ALTER TABLE users ADD COLUMN is_banned BOOLEAN DEFAULT 0")
+        sqlx::query(add_is_banned_sql(database_kind))
             .execute(pool)
             .await
             .expect("Failed to add is_banned column");
         v = 2;
+    }
+
+    if v == 2 {
+        log(
+            Level::Info,
+            "init_database",
+            "Running migration v2 -> v3: converting last_time to unix seconds",
+        );
+        match database_kind {
+            DatabaseKind::Sqlite => {
+                migrate_sqlite_last_time_to_unix(pool)
+                    .await
+                    .expect("Failed to convert last_time column");
+            }
+            DatabaseKind::Postgres | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+                log(
+                    Level::Info,
+                    "init_database",
+                    "No schema rewrite needed for this backend, only bumping version",
+                );
+            }
+        }
+        v = 3;
     }
 
     sqlx::query("UPDATE db_version SET version = ?")
@@ -153,17 +269,114 @@ async fn upgrade_database(pool: &SqlitePool, from_version: i32) {
     );
 }
 
+async fn migrate_sqlite_last_time_to_unix(pool: &DbPool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("ALTER TABLE users RENAME TO users_v2")
+        .execute(&mut *tx)
+        .await?;
+
+    sqlx::query(
+        "CREATE TABLE users (
+            user_id INTEGER NOT NULL UNIQUE,
+            username TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            last_time BIGINT,
+            is_admin BOOLEAN NOT NULL DEFAULT 0,
+            is_banned INTEGER NOT NULL DEFAULT 0
+        )",
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO users (user_id, username, count, last_time, is_admin, is_banned)
+         SELECT
+             user_id,
+             username,
+             count,
+             CASE
+                 WHEN last_time IS NULL THEN 0
+                 WHEN typeof(last_time) = 'integer' THEN last_time
+                 ELSE CAST(strftime('%s', last_time) AS INTEGER)
+             END,
+             is_admin,
+             is_banned
+         FROM users_v2",
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query("DROP TABLE users_v2").execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn repair_null_last_time(pool: &DbPool) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE users SET last_time = 0 WHERE last_time IS NULL")
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Check if a user is an admin
-pub async fn is_admin(pool: &SqlitePool, user_id: i64) -> Result<bool, sqlx::Error> {
-    sqlx::query("SELECT is_admin FROM users WHERE user_id = ?")
+/// Check if a user is an admin
+pub async fn is_admin(pool: &DbPool, user_id: i64) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query("SELECT is_admin FROM users WHERE user_id = ?")
         .bind(user_id)
         .fetch_optional(pool)
-        .await
-        .map(|row| row.is_some_and(|r| r.get("is_admin")))
+        .await?;
+
+    let result = match row {
+        Some(r) => {
+            // Handle both boolean and integer representations
+            // Try bool first (PostgreSQL, MySQL with actual BOOLEAN), fall back to i32 (SQLite)
+            match r.try_get::<bool, _>("is_admin") {
+                Ok(b) => {
+                    log(
+                        Level::Debug,
+                        "is_admin",
+                        &format!("User {} is_admin (bool): {}", user_id, b),
+                    );
+                    b
+                }
+                Err(_) => match r.try_get::<i32, _>("is_admin") {
+                    Ok(v) => {
+                        let b = v != 0;
+                        log(
+                            Level::Debug,
+                            "is_admin",
+                            &format!("User {} is_admin (i32->bool): {} (from {})", user_id, b, v),
+                        );
+                        b
+                    }
+                    Err(e) => {
+                        log(
+                            Level::Error,
+                            "is_admin",
+                            &format!("Failed to get is_admin for user {}: {}", user_id, e),
+                        );
+                        false
+                    }
+                },
+            }
+        }
+        None => {
+            log(
+                Level::Debug,
+                "is_admin",
+                &format!("User {} not found in database", user_id),
+            );
+            false
+        }
+    };
+
+    Ok(result)
 }
 
 // Ban Status
-pub async fn ban_status(pool: &SqlitePool, user_id: i64) -> Result<i32, sqlx::Error> {
+pub async fn ban_status(pool: &DbPool, user_id: i64) -> Result<i32, sqlx::Error> {
     sqlx::query_scalar("SELECT is_banned FROM users WHERE user_id = ?")
         .bind(user_id)
         .fetch_optional(pool)
@@ -172,11 +385,7 @@ pub async fn ban_status(pool: &SqlitePool, user_id: i64) -> Result<i32, sqlx::Er
 }
 
 /// Set a user's count
-pub async fn set_user_count(
-    pool: &SqlitePool,
-    user_id: i64,
-    count: i64,
-) -> Result<(), sqlx::Error> {
+pub async fn set_user_count(pool: &DbPool, user_id: i64, count: i64) -> Result<(), sqlx::Error> {
     log(
         Level::Info,
         "set_user_count",
@@ -191,7 +400,7 @@ pub async fn set_user_count(
 }
 
 /// Delete a user from the table
-pub async fn delete_user(pool: &SqlitePool, user_id: i64) -> Result<(), sqlx::Error> {
+pub async fn delete_user(pool: &DbPool, user_id: i64) -> Result<(), sqlx::Error> {
     log(
         Level::Info,
         "delete_user",
@@ -206,32 +415,27 @@ pub async fn delete_user(pool: &SqlitePool, user_id: i64) -> Result<(), sqlx::Er
 
 pub async fn upsert_user<'a, E>(
     pool: E,
+    database_kind: DatabaseKind,
     user_id: i64,
     username: &str,
     new_count: i64,
-    now: chrono::DateTime<Utc>,
+    now: i64,
 ) -> Result<(), sqlx::Error>
 where
-    E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    E: sqlx::Executor<'a, Database = Any>,
 {
     log(
         Level::Debug,
         "handle_zw",
         "Inserting/updating user in database",
     );
-    if let Err(e) = sqlx::query(
-        "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-         username = excluded.username,
-         count = excluded.count,
-         last_time = excluded.last_time",
-    )
-    .bind(user_id)
-    .bind(username)
-    .bind(new_count)
-    .bind(now)
-    .execute(pool)
-    .await
+    if let Err(e) = sqlx::query(upsert_user_sql(database_kind))
+        .bind(user_id)
+        .bind(username)
+        .bind(new_count)
+        .bind(now)
+        .execute(pool)
+        .await
     {
         log(
             Level::Error,
@@ -245,7 +449,7 @@ where
 }
 
 pub async fn user_exists(
-    pool: &SqlitePool,
+    pool: &DbPool,
     user_id: i64,
 ) -> Result<bool, Box<dyn Error + Send + Sync>> {
     log(
@@ -260,39 +464,50 @@ pub async fn user_exists(
     Ok(row.is_some())
 }
 
-pub async fn get_total_users(pool: &SqlitePool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+pub async fn get_total_users(
+    pool: &DbPool,
+    database_kind: DatabaseKind,
+) -> Result<i64, Box<dyn Error + Send + Sync>> {
     log(Level::Debug, "get_total_users", "Fetching total user count");
-    let row = sqlx::query("SELECT COUNT(*) as count FROM users")
-        .fetch_one(pool)
-        .await?;
-    let count: i64 = row.try_get("count")?;
+    let row = sqlx::query(match database_kind {
+        DatabaseKind::Sqlite => "SELECT COUNT(*) as user_count FROM users",
+        DatabaseKind::Postgres => "SELECT COUNT(*) as user_count FROM users",
+        DatabaseKind::MySql | DatabaseKind::MariaDb => "SELECT COUNT(*) as `user_count` FROM users",
+    })
+    .fetch_one(pool)
+    .await?;
+    let count: i64 = row.try_get("user_count")?;
     Ok(count)
 }
 
 pub async fn get_rank(
-    pool: &SqlitePool,
+    pool: &DbPool,
     user_id: i64,
+    database_kind: DatabaseKind,
 ) -> Result<usize, Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,
         "get_rank",
         &format!("Calculating rank for user: {}", user_id),
     );
-    let row = match sqlx::query(
-        "SELECT COUNT(*) as rank FROM users WHERE count > (SELECT count FROM users WHERE user_id = ?) OR (count = (SELECT count FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
-    )
-    .bind(user_id)
-    .bind(user_id)
-    .bind(user_id)
-    .fetch_one(pool)
-    .await {
+    let row = match sqlx::query(get_rank_sql(database_kind))
+        .bind(user_id)
+        .bind(user_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
-            log(Level::Error, "get_rank", &format!("Failed to fetch rank for user {}: {}", user_id, e));
+            log(
+                Level::Error,
+                "get_rank",
+                &format!("Failed to fetch rank for user {}: {}", user_id, e),
+            );
             return Err(Box::new(e));
         }
     };
-    let rank: i64 = row.try_get("rank")?;
+    let rank: i64 = row.try_get("user_rank")?;
     let final_rank = (rank + 1) as usize;
     log(
         Level::Debug,
@@ -303,9 +518,9 @@ pub async fn get_rank(
 }
 
 pub async fn get_user_count_and_last_time(
-    pool: &SqlitePool,
+    pool: &DbPool,
     user_id: i64,
-) -> Result<(i64, Option<chrono::DateTime<Utc>>), Box<dyn Error + Send + Sync>> {
+) -> Result<(i64, Option<i64>), Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,
         "get_user_count_and_last_time",
@@ -318,7 +533,7 @@ pub async fn get_user_count_and_last_time(
 
     if let Some(row) = row {
         let count: i64 = row.try_get("count")?;
-        let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
+        let last_time: Option<i64> = row.try_get("last_time").ok();
         Ok((count, last_time))
     } else {
         Ok((0, None))
@@ -327,17 +542,15 @@ pub async fn get_user_count_and_last_time(
 
 /// Find user by ID or username, returns (count, last_time, username, user_id)
 pub async fn find_user_by_id_or_username(
-    pool: &SqlitePool,
+    pool: &DbPool,
     key: &str,
-) -> Result<Option<(i64, Option<chrono::DateTime<Utc>>, String, i64)>, Box<dyn Error + Send + Sync>>
-{
+) -> Result<Option<(i64, Option<i64>, String, i64)>, Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,
         "find_user_by_id_or_username",
         &format!("Searching for user by key: {}", key),
     );
 
-    // try to parse as user_id first
     if let Ok(id) = key.parse::<i64>() {
         if let Some(row) =
             sqlx::query("SELECT count, last_time, username, user_id FROM users WHERE user_id = ?")
@@ -346,7 +559,7 @@ pub async fn find_user_by_id_or_username(
                 .await?
         {
             let count: i64 = row.try_get("count")?;
-            let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
+            let last_time: Option<i64> = row.try_get("last_time").ok();
             let username: String = row.try_get("username")?;
             let user_id: i64 = row.try_get("user_id")?;
             return Ok(Some((count, last_time, username, user_id)));
@@ -354,7 +567,6 @@ pub async fn find_user_by_id_or_username(
         return Ok(None);
     }
 
-    // try to parse as username (with optional @)
     let uname = key.trim_start_matches('@');
     if let Some(row) =
         sqlx::query("SELECT count, last_time, username, user_id FROM users WHERE username = ?")
@@ -363,7 +575,7 @@ pub async fn find_user_by_id_or_username(
             .await?
     {
         let count: i64 = row.try_get("count")?;
-        let last_time: Option<chrono::DateTime<Utc>> = row.try_get("last_time").ok();
+        let last_time: Option<i64> = row.try_get("last_time").ok();
         let username: String = row.try_get("username")?;
         let user_id: i64 = row.try_get("user_id")?;
         Ok(Some((count, last_time, username, user_id)))
@@ -381,17 +593,13 @@ pub struct CooldownStatus {
 }
 
 /// Check cooldown status for a user
-pub fn check_cooldown(
-    last_time: Option<chrono::DateTime<Utc>>,
-    now: chrono::DateTime<Utc>,
-    duration: Duration,
-) -> CooldownStatus {
+pub fn check_cooldown(last_time: Option<i64>, now: i64, duration: Duration) -> CooldownStatus {
     if let Some(lt) = last_time {
-        let next_time = lt + duration;
+        let next_time = lt + duration.num_seconds();
         if now < next_time {
             let remaining = next_time - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
+            let mins = remaining / 60;
+            let secs = remaining % 60;
             return CooldownStatus {
                 is_in_cooldown: true,
                 mins,

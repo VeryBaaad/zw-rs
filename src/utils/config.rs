@@ -12,10 +12,19 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_DATABASE_URL: &str = "sqlite:zw.db";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatabaseKind {
+    Sqlite,
+    Postgres,
+    MySql,
+    MariaDb,
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub teloxide_token: String,
     pub database_url: String,
+    pub database_kind: DatabaseKind,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,10 +62,12 @@ pub fn load_runtime_config() -> Result<RuntimeConfig> {
         .or_else(|| env::var("DATABASE_URL").ok())
         .unwrap_or_else(|| DEFAULT_DATABASE_URL.to_string());
     let database_url = normalize_database_url(database_url);
+    let database_kind = database_kind_from_url(&database_url)?;
 
     Ok(RuntimeConfig {
         teloxide_token: token,
         database_url,
+        database_kind,
     })
 }
 
@@ -117,4 +128,23 @@ fn normalize_database_url(url: String) -> String {
     }
 
     url
+}
+
+fn database_kind_from_url(url: &str) -> Result<DatabaseKind> {
+    if url.starts_with("sqlite:") {
+        return Ok(DatabaseKind::Sqlite);
+    }
+    if url.starts_with("postgres:") || url.starts_with("postgresql:") {
+        return Ok(DatabaseKind::Postgres);
+    }
+    if url.starts_with("mysql:") {
+        return Ok(DatabaseKind::MySql);
+    }
+    if url.starts_with("mariadb:") {
+        return Ok(DatabaseKind::MariaDb);
+    }
+
+    Err(anyhow!(
+        "Unsupported database URL scheme. Expected sqlite, postgres, mysql, or mariadb"
+    ))
 }
