@@ -4,6 +4,7 @@
  */
 use crate::handlers::commands::get_version_info;
 use crate::services::{build_rank_keyboard, build_rank_text, calculate_page_info};
+use crate::utils::DbPool;
 use crate::utils::db::ban_status;
 use crate::utils::fun::eunjeong_generate;
 use crate::utils::get_total_users;
@@ -12,7 +13,6 @@ use crate::utils::user_exists;
 use log::Level;
 use rand::RngExt;
 use rand::rng;
-use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::{
     prelude::*,
@@ -23,7 +23,7 @@ use tokio::time::{Duration, sleep};
 pub async fn inline_query_handler(
     bot: Bot,
     q: InlineQuery,
-    pool: SqlitePool,
+    pool: DbPool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,

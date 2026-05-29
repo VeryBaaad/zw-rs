@@ -6,16 +6,19 @@ use crate::services::{
     build_rank_keyboard, build_rank_text, calculate_page_info, handle_rank, process_zw_for_user,
     process_zw_help_for_user,
 };
+use crate::utils::DbPool;
+use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
 use log::Level;
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 use std::error::Error;
 use teloxide::prelude::*;
 
 pub async fn callback_handler(
     bot: Bot,
     q: CallbackQuery,
-    pool: SqlitePool,
+    pool: DbPool,
+    database_kind: DatabaseKind,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(data) = &q.data {
         log(
@@ -134,7 +137,8 @@ pub async fn callback_handler(
                 None => from.first_name.clone(),
             };
 
-            match process_zw_for_user(&pool, user_id, username, &display_name).await {
+            match process_zw_for_user(&pool, database_kind, user_id, username, &display_name).await
+            {
                 Ok((text, _)) => {
                     if let Some(msg) = &q.message {
                         log(
@@ -264,6 +268,7 @@ pub async fn callback_handler(
 
                     match process_zw_help_for_user(
                         &pool,
+                        database_kind,
                         actual_initiator_id,
                         initiator_username,
                         &initiator_name,

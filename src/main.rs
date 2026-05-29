@@ -13,9 +13,10 @@ use anyhow::Context;
 use handlers::commands::Command;
 use handlers::{callback_handler, commands_handler, inline_query_handler};
 use log::Level;
-use sqlx::SqlitePool;
+use sqlx::any::install_default_drivers;
 use teloxide::prelude::*;
 use tokio::sync::watch;
+use utils::DbPool;
 use utils::config::load_runtime_config;
 use utils::db::init_database;
 use utils::logger::log;
@@ -70,12 +71,14 @@ pub async fn run_bot(
     let bot = Bot::new(config.teloxide_token);
 
     let database_url = config.database_url;
+    let database_kind = config.database_kind;
+    install_default_drivers();
     log(
         Level::Info,
         "ZWBotDaemon",
         &format!("Connecting to database: {}", database_url),
     );
-    let pool = SqlitePool::connect(&database_url)
+    let pool = DbPool::connect(&database_url)
         .await
         .with_context(|| format!("Failed to connect to database: {database_url}"))?;
     log(
@@ -85,7 +88,7 @@ pub async fn run_bot(
     );
 
     // init the database (create tables if not exist)
-    init_database(&pool).await;
+    init_database(&pool, database_kind).await;
 
     let handler = dptree::entry()
         .branch(
@@ -96,7 +99,8 @@ pub async fn run_bot(
         .branch(Update::filter_callback_query().endpoint(callback_handler))
         .branch(Update::filter_inline_query().endpoint(inline_query_handler));
 
-    let mut dispatcher = Dispatcher::builder(bot, handler).dependencies(dptree::deps![pool]);
+    let mut dispatcher =
+        Dispatcher::builder(bot, handler).dependencies(dptree::deps![pool, database_kind]);
 
     if enable_ctrlc_handler {
         dispatcher = dispatcher.enable_ctrlc_handler();

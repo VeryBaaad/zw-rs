@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::utils::logger::log;
+use crate::utils::{DbPool, DbRow};
 use log::Level;
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 use std::error::Error;
 use teloxide::{
     prelude::*,
@@ -27,10 +28,7 @@ pub fn calculate_page_info(total: usize, page: usize) -> (usize, i64) {
 }
 
 /// Build rank text from database rows
-pub fn build_rank_text(
-    rows: &[sqlx::sqlite::SqliteRow],
-    offset: i64,
-) -> Result<String, sqlx::Error> {
+pub fn build_rank_text(rows: &[DbRow], offset: i64) -> Result<String, sqlx::Error> {
     let mut text = RANK_TITLE.to_string();
     for (i, row) in rows.iter().enumerate() {
         let rank = (offset + i as i64 + 1) as usize;
@@ -72,7 +70,7 @@ pub async fn handle_rank(
     chat_id: ChatId,
     message_id: Option<MessageId>,
     reply_to: Option<MessageId>,
-    pool: SqlitePool,
+    pool: DbPool,
     page: usize,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(

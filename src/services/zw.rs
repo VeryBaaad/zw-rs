@@ -2,21 +2,23 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
+use crate::utils::DbPool;
+use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
 use crate::utils::{
     check_cooldown, find_user_by_id_or_username, get_rank, get_user_count_and_last_time,
     upsert_user,
 };
-use chrono::{Duration, Utc};
+use chrono::Duration;
 use log::Level;
-use sqlx::SqlitePool;
 use std::error::Error;
 use teloxide::{prelude::*, types::ReplyParameters, utils::markdown};
 
 pub async fn handle_zw(
     bot: Bot,
     msg: Message,
-    pool: SqlitePool,
+    pool: DbPool,
+    database_kind: DatabaseKind,
     target_arg: Option<String>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let user = msg.from.as_ref().unwrap();
@@ -27,11 +29,11 @@ pub async fn handle_zw(
         None => user.first_name.clone(),
     };
 
-    let now = Utc::now();
+    let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
     if target_arg.is_none() {
-        return handle_zw_self(bot, msg, pool).await;
+        return handle_zw_self(bot, msg, pool, database_kind).await;
     }
 
     let target_key = target_arg.unwrap();
@@ -114,6 +116,7 @@ pub async fn handle_zw(
     let mut tx = pool.begin().await?;
     upsert_user(
         &mut *tx,
+        database_kind,
         initiator_id,
         initiator_username,
         new_initiator_count,
@@ -122,6 +125,7 @@ pub async fn handle_zw(
     .await?;
     upsert_user(
         &mut *tx,
+        database_kind,
         target_user_id,
         &target_username,
         new_target_count,
@@ -165,7 +169,8 @@ pub async fn handle_zw(
 pub async fn handle_zw_self(
     bot: Bot,
     msg: Message,
-    pool: SqlitePool,
+    pool: DbPool,
+    database_kind: DatabaseKind,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(Level::Debug, "handle_zw", "Handling zw command");
     let user = msg.from.as_ref().unwrap();
@@ -181,7 +186,7 @@ pub async fn handle_zw_self(
         &format!("User: {} (ID: {}, Username: {})", name, user_id, username),
     );
 
-    let now = Utc::now();
+    let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
     let (current_count, last_time) = get_user_count_and_last_time(&pool, user_id).await?;
@@ -228,7 +233,7 @@ pub async fn handle_zw_self(
         "handle_zw",
         &format!("Updating user count: {} -> {}", current_count, new_count),
     );
-    upsert_user(&pool, user_id, username, new_count, now).await?;
+    upsert_user(&pool, database_kind, user_id, username, new_count, now).await?;
 
     let rank = get_rank(&pool, user_id).await?;
     let text = format!(
@@ -262,7 +267,8 @@ pub async fn handle_zw_self(
 }
 
 pub async fn process_zw_for_user(
-    pool: &SqlitePool,
+    pool: &DbPool,
+    database_kind: DatabaseKind,
     user_id: i64,
     username: &str,
     display_name: &str,
@@ -272,7 +278,7 @@ pub async fn process_zw_for_user(
         "process_zw_for_user",
         &format!("Processing zw for user {} ({})", display_name, user_id),
     );
-    let now = Utc::now();
+    let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
     let (current_count, last_time_opt) = get_user_count_and_last_time(pool, user_id).await?;
@@ -293,7 +299,7 @@ pub async fn process_zw_for_user(
 
     // Update count and last_time
     let new_count = current_count + 1;
-    upsert_user(pool, user_id, username, new_count, now).await?;
+    upsert_user(pool, database_kind, user_id, username, new_count, now).await?;
 
     let rank = get_rank(pool, user_id).await?;
     let text = format!(
@@ -307,7 +313,8 @@ pub async fn process_zw_for_user(
 }
 
 pub async fn process_zw_help_for_user(
-    pool: &SqlitePool,
+    pool: &DbPool,
+    database_kind: DatabaseKind,
     initiator_id: i64,
     initiator_username: &str,
     initiator_name: &str,
@@ -322,7 +329,7 @@ pub async fn process_zw_help_for_user(
             initiator_name, target_username
         ),
     );
-    let now = Utc::now();
+    let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
     let (initiator_count, initiator_last_time_opt) =
@@ -337,35 +344,29 @@ pub async fn process_zw_help_for_user(
     let mut cd_messages = Vec::new();
 
     if let Some(lt) = initiator_last_time_opt {
-        let next = lt + cd_duration;
-        if now < next {
+        let cd_status = check_cooldown(Some(lt), now, cd_duration);
+        if cd_status.is_in_cooldown {
             any_in_cd = true;
-            let remaining = next - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
             cd_messages.push(format!(
                 "发起者 {} 仍在冷却：{}分{}秒",
                 markdown::user_mention(
                     UserId(initiator_id as u64),
                     initiator_display_name.as_str()
                 ),
-                mins,
-                secs
+                cd_status.mins,
+                cd_status.secs
             ));
         }
     }
     if let Some(lt) = target_last_time_opt {
-        let next = lt + cd_duration;
-        if now < next {
+        let cd_status = check_cooldown(Some(lt), now, cd_duration);
+        if cd_status.is_in_cooldown {
             any_in_cd = true;
-            let remaining = next - now;
-            let mins = remaining.num_minutes();
-            let secs = remaining.num_seconds() % 60;
             cd_messages.push(format!(
                 "另一位 {} 仍在冷却：{}分{}秒",
                 markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
-                mins,
-                secs
+                cd_status.mins,
+                cd_status.secs
             ));
         }
     }
@@ -406,13 +407,22 @@ pub async fn process_zw_help_for_user(
     let mut tx = pool.begin().await?;
     upsert_user(
         &mut *tx,
+        database_kind,
         initiator_id,
         initiator_username,
         new_initiator_count,
         now,
     )
     .await?;
-    upsert_user(&mut *tx, target_id, target_username, new_target_count, now).await?;
+    upsert_user(
+        &mut *tx,
+        database_kind,
+        target_id,
+        target_username,
+        new_target_count,
+        now,
+    )
+    .await?;
 
     tx.commit().await?;
 
