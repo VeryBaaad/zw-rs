@@ -326,7 +326,17 @@ pub async fn is_admin(pool: &DbPool, user_id: i64) -> Result<bool, sqlx::Error> 
         .bind(user_id)
         .fetch_optional(pool)
         .await
-        .map(|row| row.is_some_and(|r| r.get("is_admin")))
+        .map(|row| {
+            row.and_then(|r| {
+                // Handle both boolean and integer representations
+                // Try bool first (PostgreSQL, MySQL with actual BOOLEAN), fall back to i32 (SQLite)
+                match r.try_get::<bool, _>("is_admin") {
+                    Ok(b) => Some(b),
+                    Err(_) => r.try_get::<i32, _>("is_admin").ok().map(|v| v != 0),
+                }
+            })
+            .unwrap_or(false)
+        })
 }
 
 // Ban Status
