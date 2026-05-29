@@ -31,7 +31,7 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
                 user_id INTEGER NOT NULL UNIQUE,
                 username TEXT NOT NULL,
                 count INTEGER NOT NULL DEFAULT 0,
-                last_time BIGINT,
+                last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT 0,
                 is_banned INTEGER NOT NULL DEFAULT 0
             )"
@@ -41,7 +41,7 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
                 user_id BIGINT NOT NULL UNIQUE,
                 username TEXT NOT NULL,
                 count BIGINT NOT NULL DEFAULT 0,
-                last_time BIGINT,
+                last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT FALSE,
                 is_banned INTEGER NOT NULL DEFAULT 0
             )"
@@ -51,7 +51,7 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
                 user_id BIGINT NOT NULL UNIQUE,
                 username TEXT NOT NULL,
                 count BIGINT NOT NULL DEFAULT 0,
-                last_time BIGINT NULL,
+                last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT FALSE,
                 is_banned INTEGER NOT NULL DEFAULT 0
             )"
@@ -185,6 +185,10 @@ pub async fn init_database(pool: &DbPool, database_kind: DatabaseKind) {
             &format!("Database version: {}, already up to date", version),
         );
     }
+
+    repair_null_last_time(pool)
+        .await
+        .expect("Failed to backfill null last_time values");
 }
 
 /// Migrate from the given version up to CURRENT_DB_VERSION
@@ -278,7 +282,7 @@ async fn migrate_sqlite_last_time_to_unix(pool: &DbPool) -> Result<(), sqlx::Err
              username,
              count,
              CASE
-                 WHEN last_time IS NULL THEN NULL
+                 WHEN last_time IS NULL THEN 0
                  WHEN typeof(last_time) = 'integer' THEN last_time
                  ELSE CAST(strftime('%s', last_time) AS INTEGER)
              END,
@@ -292,6 +296,13 @@ async fn migrate_sqlite_last_time_to_unix(pool: &DbPool) -> Result<(), sqlx::Err
     sqlx::query("DROP TABLE users_v2").execute(&mut *tx).await?;
 
     tx.commit().await?;
+    Ok(())
+}
+
+async fn repair_null_last_time(pool: &DbPool) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE users SET last_time = 0 WHERE last_time IS NULL")
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
