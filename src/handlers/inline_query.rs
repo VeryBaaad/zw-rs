@@ -5,6 +5,7 @@
 use crate::handlers::commands::get_version_info;
 use crate::services::{build_rank_keyboard, build_rank_text, calculate_page_info};
 use crate::utils::DbPool;
+use crate::utils::config::DatabaseKind;
 use crate::utils::db::ban_status;
 use crate::utils::fun::eunjeong_generate;
 use crate::utils::get_total_users;
@@ -24,6 +25,7 @@ pub async fn inline_query_handler(
     bot: Bot,
     q: InlineQuery,
     pool: DbPool,
+    database_kind: DatabaseKind,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,
@@ -75,19 +77,23 @@ pub async fn inline_query_handler(
     // Generate rank text and keyboard
     let rank_text = async {
         match async {
-            let total = match get_total_users(&pool).await {
+            let total = match get_total_users(&pool, database_kind).await {
                 Ok(t) => t as usize,
                 Err(e) => return Err::<String, Box<dyn Error + Send + Sync>>(e),
             };
             let (_valid_page, offset) = calculate_page_info(total, rank_page);
-            let rows = sqlx::query(
-                "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
-            )
-            .bind(10i64)
-            .bind(offset)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+            let sql = match database_kind {
+                DatabaseKind::Sqlite => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?",
+                DatabaseKind::Postgres => "SELECT user_id, username, \"count\" FROM users ORDER BY \"count\" DESC, last_time ASC LIMIT ? OFFSET ?",
+                DatabaseKind::MySql => "SELECT user_id, username, `count` FROM users ORDER BY `count` DESC, last_time ASC LIMIT ? OFFSET ?",
+                DatabaseKind::MariaDb => "SELECT user_id, username, `count` FROM users ORDER BY `count` DESC, last_time ASC LIMIT ? OFFSET ?",
+            };
+            let rows = sqlx::query(sql)
+                .bind(10i64)
+                .bind(offset)
+                .fetch_all(&pool)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
             build_rank_text(&rows, offset)
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)
@@ -135,7 +141,7 @@ pub async fn inline_query_handler(
     };
 
     let rank_keyboard = {
-        let total = match get_total_users(&pool).await {
+        let total = match get_total_users(&pool, database_kind).await {
             Ok(t) => t as usize,
             Err(e) => {
                 log(

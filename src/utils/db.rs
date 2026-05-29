@@ -98,6 +98,20 @@ fn upsert_user_sql(kind: DatabaseKind) -> &'static str {
     }
 }
 
+fn get_rank_sql(kind: DatabaseKind) -> &'static str {
+    match kind {
+        DatabaseKind::Sqlite => {
+            "SELECT COUNT(*) as user_rank FROM users WHERE count > (SELECT count FROM users WHERE user_id = ?) OR (count = (SELECT count FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
+        }
+        DatabaseKind::Postgres => {
+            "SELECT COUNT(*) as user_rank FROM users WHERE \"count\" > (SELECT \"count\" FROM users WHERE user_id = ?) OR (\"count\" = (SELECT \"count\" FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
+        }
+        DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "SELECT COUNT(*) as `user_rank` FROM users WHERE `count` > (SELECT `count` FROM users WHERE user_id = ?) OR (`count` = (SELECT `count` FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))"
+        }
+    }
+}
+
 pub async fn init_database(pool: &DbPool, database_kind: DatabaseKind) {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS db_version (
@@ -404,29 +418,38 @@ pub async fn user_exists(
     Ok(row.is_some())
 }
 
-pub async fn get_total_users(pool: &DbPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+pub async fn get_total_users(
+    pool: &DbPool,
+    database_kind: DatabaseKind,
+) -> Result<i64, Box<dyn Error + Send + Sync>> {
     log(Level::Debug, "get_total_users", "Fetching total user count");
-    let row = sqlx::query("SELECT COUNT(*) as count FROM users")
-        .fetch_one(pool)
-        .await?;
-    let count: i64 = row.try_get("count")?;
+    let row = sqlx::query(match database_kind {
+        DatabaseKind::Sqlite => "SELECT COUNT(*) as user_count FROM users",
+        DatabaseKind::Postgres => "SELECT COUNT(*) as user_count FROM users",
+        DatabaseKind::MySql | DatabaseKind::MariaDb => "SELECT COUNT(*) as `user_count` FROM users",
+    })
+    .fetch_one(pool)
+    .await?;
+    let count: i64 = row.try_get("user_count")?;
     Ok(count)
 }
 
-pub async fn get_rank(pool: &DbPool, user_id: i64) -> Result<usize, Box<dyn Error + Send + Sync>> {
+pub async fn get_rank(
+    pool: &DbPool,
+    user_id: i64,
+    database_kind: DatabaseKind,
+) -> Result<usize, Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,
         "get_rank",
         &format!("Calculating rank for user: {}", user_id),
     );
-    let row = match sqlx::query(
-        "SELECT COUNT(*) as rank FROM users WHERE count > (SELECT count FROM users WHERE user_id = ?) OR (count = (SELECT count FROM users WHERE user_id = ?) AND last_time < (SELECT last_time FROM users WHERE user_id = ?))",
-    )
-    .bind(user_id)
-    .bind(user_id)
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
+    let row = match sqlx::query(get_rank_sql(database_kind))
+        .bind(user_id)
+        .bind(user_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
     {
         Ok(r) => r,
         Err(e) => {
@@ -438,7 +461,7 @@ pub async fn get_rank(pool: &DbPool, user_id: i64) -> Result<usize, Box<dyn Erro
             return Err(Box::new(e));
         }
     };
-    let rank: i64 = row.try_get("rank")?;
+    let rank: i64 = row.try_get("user_rank")?;
     let final_rank = (rank + 1) as usize;
     log(
         Level::Debug,

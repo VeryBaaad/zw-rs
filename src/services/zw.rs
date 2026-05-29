@@ -82,8 +82,8 @@ pub async fn handle_zw(
     }
 
     if any_in_cd {
-        let initiator_rank = get_rank(&pool, initiator_id).await.unwrap_or(0);
-        let target_rank = get_rank(&pool, target_user_id).await.unwrap_or(0);
+        let initiator_rank = get_rank(&pool, initiator_id, database_kind).await.unwrap_or(0);
+        let target_rank = get_rank(&pool, target_user_id, database_kind).await.unwrap_or(0);
         let text = format!(
             "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
 发起者：{}\n\
@@ -134,8 +134,8 @@ pub async fn handle_zw(
     .await?;
     tx.commit().await?;
 
-    let initiator_rank = get_rank(&pool, initiator_id).await?;
-    let target_rank = get_rank(&pool, target_user_id).await?;
+    let initiator_rank = get_rank(&pool, initiator_id, database_kind).await?;
+    let target_rank = get_rank(&pool, target_user_id, database_kind).await?;
 
     let text = format!(
         "已进行双人运动！\n\n\
@@ -198,7 +198,7 @@ pub async fn handle_zw_self(
             "handle_zw",
             &format!("User {} still in cooldown", user_id),
         );
-        let rank = get_rank(&pool, user_id).await?;
+        let rank = get_rank(&pool, user_id, database_kind).await?;
         let text = format!(
             "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
 您在自慰排行榜上的位置：{}\n\
@@ -235,7 +235,7 @@ pub async fn handle_zw_self(
     );
     upsert_user(&pool, database_kind, user_id, username, new_count, now).await?;
 
-    let rank = get_rank(&pool, user_id).await?;
+    let rank = get_rank(&pool, user_id, database_kind).await?;
     let text = format!(
         "已开始自慰！\n\n\
 您在自慰排行榜上的位置：{}\n\
@@ -286,7 +286,7 @@ pub async fn process_zw_for_user(
     // CD Check
     let cd_status = check_cooldown(last_time_opt, now, cd_duration);
     if cd_status.is_in_cooldown {
-        let rank = get_rank(pool, user_id).await.unwrap_or(0);
+        let rank = get_rank(pool, user_id, database_kind).await.unwrap_or(0);
         let text = format!(
             "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
 您在自慰排行榜上的位置：{}\n\
@@ -301,7 +301,7 @@ pub async fn process_zw_for_user(
     let new_count = current_count + 1;
     upsert_user(pool, database_kind, user_id, username, new_count, now).await?;
 
-    let rank = get_rank(pool, user_id).await?;
+    let rank = get_rank(pool, user_id, database_kind).await?;
     let text = format!(
         "已开始自慰！\n\n\
 您在自慰排行榜上的位置：{}\n\
@@ -372,8 +372,8 @@ pub async fn process_zw_help_for_user(
     }
 
     if any_in_cd {
-        let initiator_rank = get_rank(pool, initiator_id).await.unwrap_or(0);
-        let target_rank = get_rank(pool, target_id).await.unwrap_or(0);
+        let initiator_rank = get_rank(pool, initiator_id, database_kind).await.unwrap_or(0);
+        let target_rank = get_rank(pool, target_id, database_kind).await.unwrap_or(0);
         return Ok((
             format!(
                 "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
@@ -426,8 +426,8 @@ pub async fn process_zw_help_for_user(
 
     tx.commit().await?;
 
-    let initiator_rank = get_rank(pool, initiator_id).await?;
-    let target_rank = get_rank(pool, target_id).await?;
+    let initiator_rank = get_rank(pool, initiator_id, database_kind).await?;
+    let target_rank = get_rank(pool, target_id, database_kind).await?;
 
     let text = format!(
         "已进行双人运动！\n\n\
