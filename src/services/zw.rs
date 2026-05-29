@@ -82,8 +82,12 @@ pub async fn handle_zw(
     }
 
     if any_in_cd {
-        let initiator_rank = get_rank(&pool, initiator_id, database_kind).await.unwrap_or(0);
-        let target_rank = get_rank(&pool, target_user_id, database_kind).await.unwrap_or(0);
+        let initiator_rank = get_rank(&pool, initiator_id, database_kind)
+            .await
+            .unwrap_or(0);
+        let target_rank = get_rank(&pool, target_user_id, database_kind)
+            .await
+            .unwrap_or(0);
         let text = format!(
             "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
 发起者：{}\n\
@@ -372,7 +376,9 @@ pub async fn process_zw_help_for_user(
     }
 
     if any_in_cd {
-        let initiator_rank = get_rank(pool, initiator_id, database_kind).await.unwrap_or(0);
+        let initiator_rank = get_rank(pool, initiator_id, database_kind)
+            .await
+            .unwrap_or(0);
         let target_rank = get_rank(pool, target_id, database_kind).await.unwrap_or(0);
         return Ok((
             format!(

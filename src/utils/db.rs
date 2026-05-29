@@ -321,22 +321,58 @@ async fn repair_null_last_time(pool: &DbPool) -> Result<(), sqlx::Error> {
 }
 
 /// Check if a user is an admin
+/// Check if a user is an admin
 pub async fn is_admin(pool: &DbPool, user_id: i64) -> Result<bool, sqlx::Error> {
-    sqlx::query("SELECT is_admin FROM users WHERE user_id = ?")
+    let row = sqlx::query("SELECT is_admin FROM users WHERE user_id = ?")
         .bind(user_id)
         .fetch_optional(pool)
-        .await
-        .map(|row| {
-            row.and_then(|r| {
-                // Handle both boolean and integer representations
-                // Try bool first (PostgreSQL, MySQL with actual BOOLEAN), fall back to i32 (SQLite)
-                match r.try_get::<bool, _>("is_admin") {
-                    Ok(b) => Some(b),
-                    Err(_) => r.try_get::<i32, _>("is_admin").ok().map(|v| v != 0),
+        .await?;
+
+    let result = match row {
+        Some(r) => {
+            // Handle both boolean and integer representations
+            // Try bool first (PostgreSQL, MySQL with actual BOOLEAN), fall back to i32 (SQLite)
+            match r.try_get::<bool, _>("is_admin") {
+                Ok(b) => {
+                    log(
+                        Level::Debug,
+                        "is_admin",
+                        &format!("User {} is_admin (bool): {}", user_id, b),
+                    );
+                    b
                 }
-            })
-            .unwrap_or(false)
-        })
+                Err(_) => match r.try_get::<i32, _>("is_admin") {
+                    Ok(v) => {
+                        let b = v != 0;
+                        log(
+                            Level::Debug,
+                            "is_admin",
+                            &format!("User {} is_admin (i32->bool): {} (from {})", user_id, b, v),
+                        );
+                        b
+                    }
+                    Err(e) => {
+                        log(
+                            Level::Error,
+                            "is_admin",
+                            &format!("Failed to get is_admin for user {}: {}", user_id, e),
+                        );
+                        false
+                    }
+                },
+            }
+        }
+        None => {
+            log(
+                Level::Debug,
+                "is_admin",
+                &format!("User {} not found in database", user_id),
+            );
+            false
+        }
+    };
+
+    Ok(result)
 }
 
 // Ban Status
