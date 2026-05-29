@@ -17,6 +17,8 @@
      - 排行榜功能，默认为第一页
    - `/version`
      - 显示bot版本
+   - `/eunjeong <count>`
+     - 恩！情！，默认随机1-25取数
    - `/set <userid> <count>` (管理员命令)
      - 为某个用户指定次数
    - `/reset <userid>` (管理员命令)
