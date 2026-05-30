@@ -193,7 +193,8 @@ pub async fn handle_zw_self(
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
-    let (current_count, last_time) = get_user_count_and_last_time(&pool, database_kind, user_id).await?;
+    let (current_count, last_time) =
+        get_user_count_and_last_time(&pool, database_kind, user_id).await?;
 
     let cd_status = check_cooldown(last_time, now, cd_duration);
     if cd_status.is_in_cooldown {
@@ -285,7 +286,8 @@ pub async fn process_zw_for_user(
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
-    let (current_count, last_time_opt) = get_user_count_and_last_time(pool, database_kind, user_id).await?;
+    let (current_count, last_time_opt) =
+        get_user_count_and_last_time(pool, database_kind, user_id).await?;
 
     // CD Check
     let cd_status = check_cooldown(last_time_opt, now, cd_duration);

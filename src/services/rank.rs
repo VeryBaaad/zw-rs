@@ -104,14 +104,18 @@ pub async fn handle_rank(
 
     log(Level::Debug, "handle_rank", "Querying users from database");
     let rank_query = match database_kind {
-        DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?",
-        DatabaseKind::Postgres => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT $1 OFFSET $2",
+        DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
+        }
+        DatabaseKind::Postgres => {
+            "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT $1 OFFSET $2"
+        }
     };
     let rows = sqlx::query(rank_query)
-    .bind(PER_PAGE)
-    .bind(offset)
-    .fetch_all(&pool)
-    .await?;
+        .bind(PER_PAGE)
+        .bind(offset)
+        .fetch_all(&pool)
+        .await?;
     log(
         Level::Debug,
         "handle_rank",
