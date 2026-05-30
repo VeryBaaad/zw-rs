@@ -17,7 +17,7 @@ use sqlx::any::install_default_drivers;
 use teloxide::prelude::*;
 use tokio::sync::watch;
 use utils::DbPool;
-use utils::config::load_runtime_config;
+use utils::config::{DatabaseKind, load_runtime_config};
 use utils::db::init_database;
 use utils::logger::log;
 
@@ -73,6 +73,35 @@ pub async fn run_bot(
     let database_url = config.database_url;
     let database_kind = config.database_kind;
     install_default_drivers();
+
+    // For SQLite, ensure the database file exists before connecting,
+    // since sqlx::Any does not auto-create missing SQLite files.
+    if database_kind == DatabaseKind::Sqlite {
+        let path = database_url
+            .strip_prefix("sqlite:")
+            .unwrap_or(&database_url);
+        if path != ":memory:" {
+            let p = std::path::Path::new(path);
+            if !p.exists() {
+                if let Some(parent) = p.parent() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!(
+                            "Failed to create directory for database: {}",
+                            parent.display()
+                        )
+                    })?;
+                }
+                std::fs::File::create(p)
+                    .with_context(|| format!("Failed to create database file: {}", p.display()))?;
+                log(
+                    Level::Info,
+                    "ZWBotDaemon",
+                    &format!("Created new database file: {}", p.display()),
+                );
+            }
+        }
+    }
+
     log(
         Level::Info,
         "ZWBotDaemon",

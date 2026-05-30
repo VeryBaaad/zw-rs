@@ -141,6 +141,18 @@ fn update_db_version_sql(kind: DatabaseKind) -> &'static str {
     }
 }
 
+/// Read an `EXISTS(...)` result as bool, handling type differences across databases.
+/// SQLite returns integer, MySQL/MariaDB return BIGINT, Postgres returns bool.
+fn exists_result_to_bool(row: &sqlx::any::AnyRow, kind: DatabaseKind) -> Result<bool, sqlx::Error> {
+    match kind {
+        DatabaseKind::Postgres => row.try_get(0),
+        _ => {
+            let val: i64 = row.try_get(0)?;
+            Ok(val != 0)
+        }
+    }
+}
+
 pub async fn init_database(pool: &DbPool, database_kind: DatabaseKind) {
     sqlx::query("CREATE TABLE IF NOT EXISTS db_version (version INTEGER NOT NULL)")
         .execute(pool)
@@ -177,7 +189,8 @@ pub async fn init_database(pool: &DbPool, database_kind: DatabaseKind) {
                 .fetch_one(pool)
                 .await
                 .expect("Failed to check users table");
-            let users_exists: bool = row.try_get(0).expect("Failed to get EXISTS result");
+            let users_exists =
+                exists_result_to_bool(&row, database_kind).expect("Failed to get EXISTS result");
 
             if users_exists {
                 log(
@@ -239,8 +252,7 @@ async fn column_exists(
         .bind(column_name)
         .fetch_one(pool)
         .await?;
-    let exists: bool = row.try_get(0)?;
-    Ok(exists)
+    exists_result_to_bool(&row, database_kind)
 }
 
 /// Migrate from the given version up to CURRENT_DB_VERSION
