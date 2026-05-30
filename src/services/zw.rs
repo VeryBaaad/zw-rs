@@ -39,7 +39,7 @@ pub async fn handle_zw(
     let target_key = target_arg.unwrap();
     let target_key = target_key.trim().trim_start_matches('@').to_string();
 
-    let target_record = find_user_by_id_or_username(&pool, &target_key).await?;
+    let target_record = find_user_by_id_or_username(&pool, database_kind, &target_key).await?;
     if target_record.is_none() {
         let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
         let _ = bot
@@ -54,7 +54,7 @@ pub async fn handle_zw(
     let target_display_name = markdown::escape(&target_username);
 
     let (initiator_count, initiator_last_time_opt) =
-        get_user_count_and_last_time(&pool, initiator_id).await?;
+        get_user_count_and_last_time(&pool, database_kind, initiator_id).await?;
 
     let mut any_in_cd = false;
     let mut cd_messages = Vec::new();
@@ -193,7 +193,8 @@ pub async fn handle_zw_self(
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
-    let (current_count, last_time) = get_user_count_and_last_time(&pool, user_id).await?;
+    let (current_count, last_time) =
+        get_user_count_and_last_time(&pool, database_kind, user_id).await?;
 
     let cd_status = check_cooldown(last_time, now, cd_duration);
     if cd_status.is_in_cooldown {
@@ -285,7 +286,8 @@ pub async fn process_zw_for_user(
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
-    let (current_count, last_time_opt) = get_user_count_and_last_time(pool, user_id).await?;
+    let (current_count, last_time_opt) =
+        get_user_count_and_last_time(pool, database_kind, user_id).await?;
 
     // CD Check
     let cd_status = check_cooldown(last_time_opt, now, cd_duration);
@@ -337,9 +339,9 @@ pub async fn process_zw_help_for_user(
     let cd_duration = Duration::minutes(30);
 
     let (initiator_count, initiator_last_time_opt) =
-        get_user_count_and_last_time(pool, initiator_id).await?;
+        get_user_count_and_last_time(pool, database_kind, initiator_id).await?;
     let (target_count, target_last_time_opt) =
-        get_user_count_and_last_time(pool, target_id).await?;
+        get_user_count_and_last_time(pool, database_kind, target_id).await?;
     let initiator_display_name = markdown::escape(initiator_name);
     let target_display_name = markdown::escape(target_username);
 
