@@ -36,7 +36,7 @@ pub async fn inline_query_handler(
     let mut results: Vec<InlineQueryResult> = Vec::new();
 
     // when banned
-    if ban_status(&pool, q.from.id.0 as i64).await? == 1 {
+    if ban_status(&pool, database_kind, q.from.id.0 as i64).await? == 1 {
         let ban_article = InlineQueryResultArticle::new(
             "banned",
             "You have been permanently banned",
@@ -84,7 +84,7 @@ pub async fn inline_query_handler(
             let (_valid_page, offset) = calculate_page_info(total, rank_page);
             let sql = match database_kind {
                 DatabaseKind::Sqlite => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?",
-                DatabaseKind::Postgres => "SELECT user_id, username, \"count\" FROM users ORDER BY \"count\" DESC, last_time ASC LIMIT ? OFFSET ?",
+                DatabaseKind::Postgres => "SELECT user_id, username, \"count\" FROM users ORDER BY \"count\" DESC, last_time ASC LIMIT $1 OFFSET $2",
                 DatabaseKind::MySql => "SELECT user_id, username, `count` FROM users ORDER BY `count` DESC, last_time ASC LIMIT ? OFFSET ?",
                 DatabaseKind::MariaDb => "SELECT user_id, username, `count` FROM users ORDER BY `count` DESC, last_time ASC LIMIT ? OFFSET ?",
             };
@@ -226,7 +226,7 @@ pub async fn inline_query_handler(
 
     if !query.is_empty()
         && let Ok(user_id) = query.parse::<i64>()
-        && user_exists(&pool, user_id).await?
+        && user_exists(&pool, database_kind, user_id).await?
     {
         let initiator_id = q.from.id.0 as i64;
         let mut kb = teloxide::types::InlineKeyboardMarkup::default();
@@ -249,7 +249,7 @@ pub async fn inline_query_handler(
         results.push(InlineQueryResult::Article(art));
     }
 
-    if ban_status(&pool, q.from.id.0 as i64).await? == 2 {
+    if ban_status(&pool, database_kind, q.from.id.0 as i64).await? == 2 {
         let millis: u64 = rng().random_range(3000..=10000);
         sleep(Duration::from_millis(millis)).await;
     }

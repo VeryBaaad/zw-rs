@@ -45,6 +45,7 @@ pub async fn callback_handler(
                     Some(message_id),
                     None,
                     pool.clone(),
+                    database_kind,
                     page,
                 )
                 .await
@@ -68,7 +69,11 @@ pub async fn callback_handler(
                     .try_get::<i64, _>("count")? as usize;
                 let (valid_page, offset) = calculate_page_info(total, page);
 
-                let rows = sqlx::query("SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?")
+                let rank_query = match database_kind {
+                    DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?",
+                    DatabaseKind::Postgres => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT $1 OFFSET $2",
+                };
+                let rows = sqlx::query(rank_query)
                     .bind(10i64).bind(offset).fetch_all(&pool).await?;
 
                 let text = build_rank_text(&rows, offset)?;

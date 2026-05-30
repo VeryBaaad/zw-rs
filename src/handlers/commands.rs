@@ -39,7 +39,7 @@ pub async fn commands_handler(
         "commands_handler",
         &format!("Received command: {:?}", cmd),
     );
-    if ban_status(&pool, msg.from.as_ref().map_or(0, |u| u.id.0 as i64)).await? == 1 {
+    if ban_status(&pool, database_kind, msg.from.as_ref().map_or(0, |u| u.id.0 as i64)).await? == 1 {
         log(
             Level::Info,
             "commands_handler",
@@ -57,7 +57,7 @@ pub async fn commands_handler(
         .await?;
         return Ok(());
     }
-    if ban_status(&pool, msg.from.as_ref().map_or(0, |u| u.id.0 as i64)).await? == 2 {
+    if ban_status(&pool, database_kind, msg.from.as_ref().map_or(0, |u| u.id.0 as i64)).await? == 2 {
         let millis: u64 = rng().random_range(3000..=10000);
         sleep(Duration::from_millis(millis)).await;
     }
@@ -95,7 +95,7 @@ pub async fn commands_handler(
                 "commands_handler",
                 &format!("Parsed rank page argument: {}", page),
             );
-            handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, page).await?;
+            handle_rank(bot, msg.chat.id, None, Some(msg.id), pool, database_kind, page).await?;
         }
         Command::Version => {
             let version_info = get_version_info().await?;
@@ -116,7 +116,7 @@ pub async fn commands_handler(
         }
         Command::Set(arg) => {
             if let Some(user) = msg.from {
-                if !is_admin(&pool, user.id.0 as i64).await.unwrap_or(false) {
+                if !is_admin(&pool, database_kind, user.id.0 as i64).await.unwrap_or(false) {
                     bot.send_message(msg.chat.id, "Permission denied.").await?;
                     return Ok(());
                 }
@@ -140,7 +140,7 @@ pub async fn commands_handler(
                         return Ok(());
                     }
                 };
-                set_user_count(&pool, target_id, count).await?;
+                set_user_count(&pool, database_kind, target_id, count).await?;
                 bot.send_message(
                     msg.chat.id,
                     format!("User {} count set to {}.", target_id, count),
@@ -151,7 +151,7 @@ pub async fn commands_handler(
         Command::Reset(arg) => {
             if let Some(user) = msg.from {
                 let user_id = user.id.0 as i64;
-                let admin_result = is_admin(&pool, user_id).await;
+                let admin_result = is_admin(&pool, database_kind, user_id).await;
                 log(
                     Level::Debug,
                     "commands_handler",
@@ -172,7 +172,7 @@ pub async fn commands_handler(
                         return Ok(());
                     }
                 };
-                delete_user(&pool, target_id).await?;
+                delete_user(&pool, database_kind, target_id).await?;
                 bot.send_message(msg.chat.id, format!("User {} removed.", target_id))
                     .await?;
             }

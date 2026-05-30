@@ -2,6 +2,7 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
+use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
 use crate::utils::{DbPool, DbRow};
 use log::Level;
@@ -71,6 +72,7 @@ pub async fn handle_rank(
     message_id: Option<MessageId>,
     reply_to: Option<MessageId>,
     pool: DbPool,
+    database_kind: DatabaseKind,
     page: usize,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(
@@ -101,9 +103,11 @@ pub async fn handle_rank(
     );
 
     log(Level::Debug, "handle_rank", "Querying users from database");
-    let rows = sqlx::query(
-        "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
-    )
+    let rank_query = match database_kind {
+        DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?",
+        DatabaseKind::Postgres => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT $1 OFFSET $2",
+    };
+    let rows = sqlx::query(rank_query)
     .bind(PER_PAGE)
     .bind(offset)
     .fetch_all(&pool)
