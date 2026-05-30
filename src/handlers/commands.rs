@@ -150,7 +150,17 @@ pub async fn commands_handler(
         }
         Command::Reset(arg) => {
             if let Some(user) = msg.from {
-                if !is_admin(&pool, user.id.0 as i64).await.unwrap_or(false) {
+                let user_id = user.id.0 as i64;
+                let admin_result = is_admin(&pool, user_id).await;
+                log(
+                    Level::Debug,
+                    "commands_handler",
+                    &format!(
+                        "Reset command: user_id={}, is_admin result={:?}",
+                        user_id, admin_result
+                    ),
+                );
+                if !admin_result.unwrap_or(false) {
                     bot.send_message(msg.chat.id, "Permission denied.").await?;
                     return Ok(());
                 }
