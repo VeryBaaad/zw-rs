@@ -477,6 +477,29 @@ pub async fn set_user_count(
     Ok(())
 }
 
+/// Set a user's last_time to 0
+pub async fn set_user_last_time(
+    pool: &DbPool,
+    database_kind: DatabaseKind,
+    user_id: i64,
+) -> Result<(), sqlx::Error> {
+    log(
+        Level::Info,
+        "set_user_last_time",
+        &format!("Setting user {} last_time to 0", user_id),
+    );
+    sqlx::query(match database_kind {
+        DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "UPDATE users SET last_time = 0 WHERE user_id = ?"
+        }
+        DatabaseKind::Postgres => "UPDATE users SET last_time = 0 WHERE user_id = $1",
+    })
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Delete a user from the table
 pub async fn delete_user(
     pool: &DbPool,
