@@ -5,7 +5,7 @@
 use crate::services::{handle_rank, handle_zw};
 use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
-use crate::utils::db::{ban_status, delete_user, is_admin, set_user_count};
+use crate::utils::db::{ban_status, delete_user, is_admin, set_user_count, set_user_last_time};
 use crate::utils::fun::eunjeong_generate;
 use crate::utils::logger::log;
 use log::Level;
@@ -25,6 +25,7 @@ pub enum Command {
     Eunjeong(String),
     Set(String),
     Reset(String),
+    Continue(String),
 }
 
 pub async fn commands_handler(
@@ -201,6 +202,32 @@ pub async fn commands_handler(
                 delete_user(&pool, database_kind, target_id).await?;
                 bot.send_message(msg.chat.id, format!("User {} removed.", target_id))
                     .await?;
+            }
+        }
+        Command::Continue(arg) => {
+            if let Some(user) = msg.from {
+                let user_id = user.id.0 as i64;
+                if !is_admin(&pool, database_kind, user_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    bot.send_message(msg.chat.id, "Permission denied.").await?;
+                    return Ok(());
+                }
+                let target_id: i64 = match arg.trim().parse() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        bot.send_message(msg.chat.id, "Usage: /continue <user_id>")
+                            .await?;
+                        return Ok(());
+                    }
+                };
+                set_user_last_time(&pool, database_kind, target_id).await?;
+                bot.send_message(
+                    msg.chat.id,
+                    format!("User {} last_time set to 0.", target_id),
+                )
+                .await?;
             }
         }
     }
