@@ -66,6 +66,7 @@ jobs:
     name: Upload to Telegram
     needs: run
     runs-on: ubuntu-latest
+    permissions: {}
     env:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       CHAT_ID: ${{ secrets.CHAT_ID }}
