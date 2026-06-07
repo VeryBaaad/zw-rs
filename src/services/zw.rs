@@ -209,11 +209,7 @@ pub async fn handle_zw_self(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-            name,
-            rank,
-            markdown::escape(current_count.to_string().as_str()),
-            cd_status.mins,
-            cd_status.secs
+            name, rank, current_count, cd_status.mins, cd_status.secs
         );
         if let Err(e) = bot
             .send_message(msg.chat.id, text)
@@ -250,8 +246,7 @@ pub async fn handle_zw_self(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：30分0秒",
-        rank,
-        markdown::escape(new_count.to_string().as_str())
+        rank, new_count
     );
     if let Err(e) = bot
         .send_message(msg.chat.id, text)
@@ -303,11 +298,7 @@ pub async fn process_zw_for_user(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-            display_name,
-            rank,
-            markdown::escape(current_count.to_string().as_str()),
-            cd_status.mins,
-            cd_status.secs
+            display_name, rank, current_count, cd_status.mins, cd_status.secs
         );
         return Ok((text, current_count));
     }
@@ -322,8 +313,7 @@ pub async fn process_zw_for_user(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：30分0秒",
-        rank,
-        markdown::escape(new_count.to_string().as_str())
+        rank, new_count
     );
     Ok((text, new_count))
 }
