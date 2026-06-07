@@ -99,10 +99,10 @@ pub async fn handle_zw(
 {}",
             initiator_display_name,
             markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
-            initiator_count,
+            markdown::escape(initiator_count.to_string().as_str()),
             initiator_rank,
             markdown::user_mention(UserId(target_user_id as u64), target_display_name.as_str()),
-            target_count,
+            markdown::escape(target_count.to_string().as_str()),
             target_rank,
             cd_messages.join("\n")
         );
@@ -151,8 +151,8 @@ pub async fn handle_zw(
 下次可进行自慰的时间：30分0秒",
         markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
         markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
-        new_initiator_count,
-        new_target_count,
+        markdown::escape(new_initiator_count.to_string().as_str()),
+        markdown::escape(new_target_count.to_string().as_str()),
         initiator_rank,
         target_rank
     );
@@ -209,7 +209,7 @@ pub async fn handle_zw_self(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-            name, rank, current_count, cd_status.mins, cd_status.secs
+            name, rank, markdown::escape(current_count.to_string().as_str()), cd_status.mins, cd_status.secs
         );
         if let Err(e) = bot
             .send_message(msg.chat.id, text)
@@ -246,7 +246,7 @@ pub async fn handle_zw_self(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：30分0秒",
-        rank, new_count
+        rank, markdown::escape(new_count.to_string().as_str())
     );
     if let Err(e) = bot
         .send_message(msg.chat.id, text)
@@ -298,7 +298,7 @@ pub async fn process_zw_for_user(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-            display_name, rank, current_count, cd_status.mins, cd_status.secs
+            display_name, rank, markdown::escape(current_count.to_string().as_str()), cd_status.mins, cd_status.secs
         );
         return Ok((text, current_count));
     }
@@ -313,7 +313,7 @@ pub async fn process_zw_for_user(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：30分0秒",
-        rank, new_count
+        rank, markdown::escape(new_count.to_string().as_str())
     );
     Ok((text, new_count))
 }
@@ -397,10 +397,10 @@ pub async fn process_zw_help_for_user(
                     UserId(initiator_id as u64),
                     initiator_display_name.as_str()
                 ),
-                initiator_count,
+                markdown::escape(initiator_count.to_string().as_str()),
                 initiator_rank,
                 markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
-                target_count,
+                markdown::escape(target_count.to_string().as_str()),
                 target_rank,
                 cd_messages.join("\n")
             ),
@@ -447,8 +447,8 @@ pub async fn process_zw_help_for_user(
 下次可进行自慰的时间：30分0秒",
         markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
         markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
-        new_initiator_count,
-        new_target_count,
+        markdown::escape(new_initiator_count.to_string().as_str()),
+        markdown::escape(new_target_count.to_string().as_str()),
         initiator_rank,
         target_rank
     );
