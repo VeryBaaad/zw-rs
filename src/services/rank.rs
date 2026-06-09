@@ -11,6 +11,7 @@ use std::error::Error;
 use teloxide::{
     prelude::*,
     types::{InlineKeyboardMarkup, MessageId, ReplyParameters},
+    utils::markdown,
 };
 
 const PER_PAGE: i64 = 10;
@@ -37,8 +38,13 @@ pub fn build_rank_text(rows: &[DbRow], offset: i64) -> Result<String, sqlx::Erro
         let count: i64 = row.try_get("count")?;
         let user_id: i64 = row.try_get("user_id")?;
         text.push_str(&format!(
-            "{}. {}: {}次\n{}\n",
-            rank, username, count, user_id
+            "{}\\. {}: {}次\n",
+            rank,
+            markdown::user_mention(
+                UserId(user_id as u64),
+                markdown::escape(username.as_str()).as_str()
+            ),
+            markdown::escape(count.to_string().as_str())
         ));
     }
     Ok(text)
@@ -130,6 +136,7 @@ pub async fn handle_rank(
         if let Err(e) = bot
             .edit_message_text(chat_id, message_id, text)
             .reply_markup(keyboard)
+            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
             .await
         {
             log(
@@ -143,7 +150,9 @@ pub async fn handle_rank(
         log(Level::Debug, "handle_rank", "Sending new rank message");
         let mut req = bot.send_message(chat_id, text).reply_markup(keyboard);
         if let Some(reply_id) = reply_to {
-            req = req.reply_parameters(ReplyParameters::new(reply_id));
+            req = req
+                .reply_parameters(ReplyParameters::new(reply_id))
+                .parse_mode(teloxide::types::ParseMode::MarkdownV2);
         }
         if let Err(e) = req.await {
             log(
