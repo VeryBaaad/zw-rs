@@ -13,6 +13,14 @@ use teloxide::{prelude::*, utils::markdown};
 
 const CURRENT_DB_VERSION: i32 = 4;
 
+/// Compact user identity used to pass user fields to DB/service functions.
+pub struct UserIdent<'a> {
+    pub user_id: i64,
+    pub username: Option<&'a str>,
+    pub first_name: Option<&'a str>,
+    pub last_name: Option<&'a str>,
+}
+
 fn users_table_exists_sql(kind: DatabaseKind) -> &'static str {
     match kind {
         DatabaseKind::Sqlite => {
@@ -568,10 +576,7 @@ pub async fn delete_user(
 pub async fn upsert_user<'a, E>(
     pool: E,
     database_kind: DatabaseKind,
-    user_id: i64,
-    username: Option<&str>,
-    first_name: Option<&str>,
-    last_name: Option<&str>,
+    user: &UserIdent<'_>,
     new_count: i64,
     now: i64,
 ) -> Result<(), sqlx::Error>
@@ -584,10 +589,10 @@ where
         "Inserting/updating user in database",
     );
     if let Err(e) = sqlx::query(upsert_user_sql(database_kind))
-        .bind(user_id)
-        .bind(username)
-        .bind(first_name)
-        .bind(last_name)
+        .bind(user.user_id)
+        .bind(user.username)
+        .bind(user.first_name)
+        .bind(user.last_name)
         .bind(new_count)
         .bind(now)
         .execute(pool)
@@ -857,10 +862,12 @@ pub async fn sync_user_info(
         upsert_user(
             pool,
             database_kind,
-            user_id,
-            username,
-            first_name,
-            last_name,
+            &UserIdent {
+                user_id,
+                username,
+                first_name,
+                last_name,
+            },
             0,
             0,
         )

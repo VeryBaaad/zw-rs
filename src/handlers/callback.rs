@@ -328,14 +328,18 @@ pub async fn callback_handler(
                     match process_zw_help_for_user(
                         &pool,
                         database_kind,
-                        actual_initiator_id,
-                        initiator_username,
-                        initiator_first_name,
-                        initiator_last_name,
-                        target_id,
-                        target_username.as_deref(),
-                        target_first_name.as_deref(),
-                        target_last_name.as_deref(),
+                        &crate::utils::UserIdent {
+                            user_id: actual_initiator_id,
+                            username: initiator_username,
+                            first_name: initiator_first_name,
+                            last_name: initiator_last_name,
+                        },
+                        &crate::utils::UserIdent {
+                            user_id: target_id,
+                            username: target_username.as_deref(),
+                            first_name: target_first_name.as_deref(),
+                            last_name: target_last_name.as_deref(),
+                        },
                     )
                     .await
                     {

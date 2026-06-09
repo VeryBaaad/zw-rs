@@ -6,7 +6,7 @@ use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
 use crate::utils::{
-    check_cooldown, find_user_by_id_or_username, format_user_mention, get_rank,
+    UserIdent, check_cooldown, find_user_by_id_or_username, format_user_mention, get_rank,
     get_user_count_and_last_time, sync_user_info, upsert_user,
 };
 use chrono::Duration;
@@ -149,10 +149,12 @@ pub async fn handle_zw(
     upsert_user(
         &mut *tx,
         database_kind,
-        initiator_id,
-        initiator_username,
-        initiator_first_name,
-        initiator_last_name,
+        &UserIdent {
+            user_id: initiator_id,
+            username: initiator_username,
+            first_name: initiator_first_name,
+            last_name: initiator_last_name,
+        },
         new_initiator_count,
         now,
     )
@@ -160,10 +162,12 @@ pub async fn handle_zw(
     upsert_user(
         &mut *tx,
         database_kind,
-        target_user_id,
-        Some(&target_username),
-        target_first_name.as_deref(),
-        target_last_name.as_deref(),
+        &UserIdent {
+            user_id: target_user_id,
+            username: Some(&target_username),
+            first_name: target_first_name.as_deref(),
+            last_name: target_last_name.as_deref(),
+        },
         new_target_count,
         now,
     )
@@ -296,10 +300,12 @@ pub async fn handle_zw_self(
     upsert_user(
         &pool,
         database_kind,
-        user_id,
-        username,
-        first_name,
-        last_name,
+        &UserIdent {
+            user_id,
+            username,
+            first_name,
+            last_name,
+        },
         new_count,
         now,
     )
@@ -375,10 +381,12 @@ pub async fn process_zw_for_user(
     upsert_user(
         pool,
         database_kind,
-        user_id,
-        username,
-        first_name,
-        last_name,
+        &UserIdent {
+            user_id,
+            username,
+            first_name,
+            last_name,
+        },
         new_count,
         now,
     )
@@ -398,26 +406,20 @@ pub async fn process_zw_for_user(
 pub async fn process_zw_help_for_user(
     pool: &DbPool,
     database_kind: DatabaseKind,
-    initiator_id: i64,
-    initiator_username: Option<&str>,
-    initiator_first_name: Option<&str>,
-    initiator_last_name: Option<&str>,
-    target_id: i64,
-    target_username: Option<&str>,
-    target_first_name: Option<&str>,
-    target_last_name: Option<&str>,
+    initiator: &UserIdent<'_>,
+    target: &UserIdent<'_>,
 ) -> Result<(String, bool), Box<dyn Error + Send + Sync>> {
     let initiator_mention = format_user_mention(
-        initiator_id,
-        initiator_first_name,
-        initiator_last_name,
-        initiator_username,
+        initiator.user_id,
+        initiator.first_name,
+        initiator.last_name,
+        initiator.username,
     );
     let target_mention = format_user_mention(
-        target_id,
-        target_first_name,
-        target_last_name,
-        target_username,
+        target.user_id,
+        target.first_name,
+        target.last_name,
+        target.username,
     );
     log(
         Level::Debug,
@@ -431,9 +433,9 @@ pub async fn process_zw_help_for_user(
     let cd_duration = Duration::minutes(30);
 
     let (initiator_count, initiator_last_time_opt) =
-        get_user_count_and_last_time(pool, database_kind, initiator_id).await?;
+        get_user_count_and_last_time(pool, database_kind, initiator.user_id).await?;
     let (target_count, target_last_time_opt) =
-        get_user_count_and_last_time(pool, database_kind, target_id).await?;
+        get_user_count_and_last_time(pool, database_kind, target.user_id).await?;
 
     // CD Check
     let mut any_in_cd = false;
@@ -461,10 +463,12 @@ pub async fn process_zw_help_for_user(
     }
 
     if any_in_cd {
-        let initiator_rank = get_rank(pool, initiator_id, database_kind)
+        let initiator_rank = get_rank(pool, initiator.user_id, database_kind)
             .await
             .unwrap_or(0);
-        let target_rank = get_rank(pool, target_id, database_kind).await.unwrap_or(0);
+        let target_rank = get_rank(pool, target.user_id, database_kind)
+            .await
+            .unwrap_or(0);
         return Ok((
             format!(
                 "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
@@ -493,33 +497,13 @@ pub async fn process_zw_help_for_user(
     let new_target_count = target_count + 1;
 
     let mut tx = pool.begin().await?;
-    upsert_user(
-        &mut *tx,
-        database_kind,
-        initiator_id,
-        initiator_username,
-        initiator_first_name,
-        initiator_last_name,
-        new_initiator_count,
-        now,
-    )
-    .await?;
-    upsert_user(
-        &mut *tx,
-        database_kind,
-        target_id,
-        target_username,
-        target_first_name,
-        target_last_name,
-        new_target_count,
-        now,
-    )
-    .await?;
+    upsert_user(&mut *tx, database_kind, initiator, new_initiator_count, now).await?;
+    upsert_user(&mut *tx, database_kind, target, new_target_count, now).await?;
 
     tx.commit().await?;
 
-    let initiator_rank = get_rank(pool, initiator_id, database_kind).await?;
-    let target_rank = get_rank(pool, target_id, database_kind).await?;
+    let initiator_rank = get_rank(pool, initiator.user_id, database_kind).await?;
+    let target_rank = get_rank(pool, target.user_id, database_kind).await?;
 
     let text = format!(
         "已进行双人运动！\n\n\
