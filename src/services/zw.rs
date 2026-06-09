@@ -6,8 +6,8 @@ use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
 use crate::utils::{
-    check_cooldown, find_user_by_id_or_username, get_rank, get_user_count_and_last_time,
-    upsert_user,
+    UserIdent, check_cooldown, find_user_by_id_or_username, format_user_mention, get_rank,
+    get_user_count_and_last_time, sync_user_info, upsert_user,
 };
 use chrono::Duration;
 use log::Level;
@@ -23,11 +23,27 @@ pub async fn handle_zw(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let user = msg.from.as_ref().unwrap();
     let initiator_id = user.id.0 as i64;
-    let initiator_username = user.username.as_deref().unwrap_or("未知用户");
-    let initiator_name = match user.last_name.as_deref() {
-        Some(last_name) => format!("{} {}", user.first_name, last_name),
-        None => user.first_name.clone(),
-    };
+    let initiator_username = user.username.as_deref();
+    let initiator_first_name = Some(user.first_name.as_str());
+    let initiator_last_name = user.last_name.as_deref();
+
+    // Sync user info from Telegram to database (keep it up to date)
+    if let Err(e) = sync_user_info(
+        &pool,
+        database_kind,
+        initiator_id,
+        initiator_username,
+        initiator_first_name,
+        initiator_last_name,
+    )
+    .await
+    {
+        log(
+            Level::Warn,
+            "handle_zw",
+            &format!("Failed to sync user info for {}: {}", initiator_id, e),
+        );
+    }
 
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
@@ -48,10 +64,26 @@ pub async fn handle_zw(
             .await;
         return Ok(());
     }
-    let (target_count, target_last_time_opt, target_username, target_user_id) =
-        target_record.unwrap();
-    let initiator_display_name = markdown::escape(&initiator_name);
-    let target_display_name = markdown::escape(&target_username);
+    let (
+        target_count,
+        target_last_time_opt,
+        target_username,
+        target_first_name,
+        target_last_name,
+        target_user_id,
+    ) = target_record.unwrap();
+    let initiator_mention = format_user_mention(
+        initiator_id,
+        initiator_first_name,
+        initiator_last_name,
+        initiator_username,
+    );
+    let target_mention = format_user_mention(
+        target_user_id,
+        target_first_name.as_deref(),
+        target_last_name.as_deref(),
+        Some(&target_username),
+    );
 
     let (initiator_count, initiator_last_time_opt) =
         get_user_count_and_last_time(&pool, database_kind, initiator_id).await?;
@@ -64,9 +96,7 @@ pub async fn handle_zw(
         any_in_cd = true;
         cd_messages.push(format!(
             "发起者 {} 仍在冷却：{}分{}秒",
-            markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
-            initiator_cd.mins,
-            initiator_cd.secs
+            initiator_mention, initiator_cd.mins, initiator_cd.secs
         ));
     }
 
@@ -75,9 +105,7 @@ pub async fn handle_zw(
         any_in_cd = true;
         cd_messages.push(format!(
             "另一位 {} 仍在冷却：{}分{}秒",
-            markdown::user_mention(UserId(target_user_id as u64), target_display_name.as_str()),
-            target_cd.mins,
-            target_cd.secs
+            target_mention, target_cd.mins, target_cd.secs
         ));
     }
 
@@ -97,11 +125,11 @@ pub async fn handle_zw(
 次数：{}次\n\
 排行榜位置：{}\n\n\
 {}",
-            initiator_display_name,
-            markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
+            initiator_mention,
+            initiator_mention,
             markdown::escape(initiator_count.to_string().as_str()),
             initiator_rank,
-            markdown::user_mention(UserId(target_user_id as u64), target_display_name.as_str()),
+            target_mention,
             markdown::escape(target_count.to_string().as_str()),
             target_rank,
             cd_messages.join("\n")
@@ -121,8 +149,12 @@ pub async fn handle_zw(
     upsert_user(
         &mut *tx,
         database_kind,
-        initiator_id,
-        initiator_username,
+        &UserIdent {
+            user_id: initiator_id,
+            username: initiator_username,
+            first_name: initiator_first_name,
+            last_name: initiator_last_name,
+        },
         new_initiator_count,
         now,
     )
@@ -130,8 +162,12 @@ pub async fn handle_zw(
     upsert_user(
         &mut *tx,
         database_kind,
-        target_user_id,
-        &target_username,
+        &UserIdent {
+            user_id: target_user_id,
+            username: Some(&target_username),
+            first_name: target_first_name.as_deref(),
+            last_name: target_last_name.as_deref(),
+        },
         new_target_count,
         now,
     )
@@ -149,8 +185,8 @@ pub async fn handle_zw(
 您在自慰排行榜上的位置：{}\n\
 另一位在自慰排行榜上的位置：{}\n\
 下次可进行自慰的时间：30分0秒",
-        markdown::user_mention(UserId(initiator_id as u64), initiator_name.as_str()),
-        markdown::user_mention(UserId(target_user_id as u64), target_username.as_str()),
+        initiator_mention,
+        target_mention,
         markdown::escape(new_initiator_count.to_string().as_str()),
         markdown::escape(new_target_count.to_string().as_str()),
         initiator_rank,
@@ -179,16 +215,38 @@ pub async fn handle_zw_self(
     log(Level::Debug, "handle_zw", "Handling zw command");
     let user = msg.from.as_ref().unwrap();
     let user_id = user.id.0 as i64;
-    let username = user.username.as_deref().unwrap_or("未知用户");
-    let name = match user.last_name.as_deref() {
-        Some(last_name) => format!("{} {}", user.first_name, last_name),
-        None => user.first_name.clone(),
-    };
+    let username = user.username.as_deref();
+    let first_name = Some(user.first_name.as_str());
+    let last_name = user.last_name.as_deref();
+
     log(
         Level::Info,
         "handle_zw",
-        &format!("User: {} (ID: {}, Username: {})", name, user_id, username),
+        &format!(
+            "User: {} (ID: {}, Username: {:?})",
+            user.first_name, user_id, username
+        ),
     );
+
+    // Sync user info
+    if let Err(e) = sync_user_info(
+        &pool,
+        database_kind,
+        user_id,
+        username,
+        first_name,
+        last_name,
+    )
+    .await
+    {
+        log(
+            Level::Warn,
+            "handle_zw",
+            &format!("Failed to sync user info for {}: {}", user_id, e),
+        );
+    }
+
+    let user_mention = format_user_mention(user_id, first_name, last_name, username);
 
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
@@ -209,11 +267,12 @@ pub async fn handle_zw_self(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-            name, rank, current_count, cd_status.mins, cd_status.secs
+            user_mention, rank, current_count, cd_status.mins, cd_status.secs
         );
         if let Err(e) = bot
             .send_message(msg.chat.id, text)
             .reply_parameters(ReplyParameters::new(msg.id))
+            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
             .await
         {
             log(
@@ -238,7 +297,19 @@ pub async fn handle_zw_self(
         "handle_zw",
         &format!("Updating user count: {} -> {}", current_count, new_count),
     );
-    upsert_user(&pool, database_kind, user_id, username, new_count, now).await?;
+    upsert_user(
+        &pool,
+        database_kind,
+        &UserIdent {
+            user_id,
+            username,
+            first_name,
+            last_name,
+        },
+        new_count,
+        now,
+    )
+    .await?;
 
     let rank = get_rank(&pool, user_id, database_kind).await?;
     let text = format!(
@@ -275,13 +346,15 @@ pub async fn process_zw_for_user(
     pool: &DbPool,
     database_kind: DatabaseKind,
     user_id: i64,
-    username: &str,
-    display_name: &str,
+    username: Option<&str>,
+    first_name: Option<&str>,
+    last_name: Option<&str>,
 ) -> Result<(String, i64), Box<dyn Error + Send + Sync>> {
+    let user_mention = format_user_mention(user_id, first_name, last_name, username);
     log(
         Level::Debug,
         "process_zw_for_user",
-        &format!("Processing zw for user {} ({})", display_name, user_id),
+        &format!("Processing zw for user {} ({})", user_mention, user_id),
     );
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
@@ -298,14 +371,26 @@ pub async fn process_zw_for_user(
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
-            display_name, rank, current_count, cd_status.mins, cd_status.secs
+            user_mention, rank, current_count, cd_status.mins, cd_status.secs
         );
         return Ok((text, current_count));
     }
 
     // Update count and last_time
     let new_count = current_count + 1;
-    upsert_user(pool, database_kind, user_id, username, new_count, now).await?;
+    upsert_user(
+        pool,
+        database_kind,
+        &UserIdent {
+            user_id,
+            username,
+            first_name,
+            last_name,
+        },
+        new_count,
+        now,
+    )
+    .await?;
 
     let rank = get_rank(pool, user_id, database_kind).await?;
     let text = format!(
@@ -321,29 +406,36 @@ pub async fn process_zw_for_user(
 pub async fn process_zw_help_for_user(
     pool: &DbPool,
     database_kind: DatabaseKind,
-    initiator_id: i64,
-    initiator_username: &str,
-    initiator_name: &str,
-    target_id: i64,
-    target_username: &str,
+    initiator: &UserIdent<'_>,
+    target: &UserIdent<'_>,
 ) -> Result<(String, bool), Box<dyn Error + Send + Sync>> {
+    let initiator_mention = format_user_mention(
+        initiator.user_id,
+        initiator.first_name,
+        initiator.last_name,
+        initiator.username,
+    );
+    let target_mention = format_user_mention(
+        target.user_id,
+        target.first_name,
+        target.last_name,
+        target.username,
+    );
     log(
         Level::Debug,
         "process_zw_help_for_user",
         &format!(
             "Processing zw help: {} helping {}",
-            initiator_name, target_username
+            initiator_mention, target_mention
         ),
     );
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
     let (initiator_count, initiator_last_time_opt) =
-        get_user_count_and_last_time(pool, database_kind, initiator_id).await?;
+        get_user_count_and_last_time(pool, database_kind, initiator.user_id).await?;
     let (target_count, target_last_time_opt) =
-        get_user_count_and_last_time(pool, database_kind, target_id).await?;
-    let initiator_display_name = markdown::escape(initiator_name);
-    let target_display_name = markdown::escape(target_username);
+        get_user_count_and_last_time(pool, database_kind, target.user_id).await?;
 
     // CD Check
     let mut any_in_cd = false;
@@ -355,12 +447,7 @@ pub async fn process_zw_help_for_user(
             any_in_cd = true;
             cd_messages.push(format!(
                 "发起者 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(
-                    UserId(initiator_id as u64),
-                    initiator_display_name.as_str()
-                ),
-                cd_status.mins,
-                cd_status.secs
+                initiator_mention, cd_status.mins, cd_status.secs
             ));
         }
     }
@@ -370,18 +457,18 @@ pub async fn process_zw_help_for_user(
             any_in_cd = true;
             cd_messages.push(format!(
                 "另一位 {} 仍在冷却：{}分{}秒",
-                markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
-                cd_status.mins,
-                cd_status.secs
+                target_mention, cd_status.mins, cd_status.secs
             ));
         }
     }
 
     if any_in_cd {
-        let initiator_rank = get_rank(pool, initiator_id, database_kind)
+        let initiator_rank = get_rank(pool, initiator.user_id, database_kind)
             .await
             .unwrap_or(0);
-        let target_rank = get_rank(pool, target_id, database_kind).await.unwrap_or(0);
+        let target_rank = get_rank(pool, target.user_id, database_kind)
+            .await
+            .unwrap_or(0);
         return Ok((
             format!(
                 "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
@@ -392,14 +479,11 @@ pub async fn process_zw_help_for_user(
 次数：{}次\n\
 排行榜位置：{}\n\n\
 {}",
-                initiator_display_name,
-                markdown::user_mention(
-                    UserId(initiator_id as u64),
-                    initiator_display_name.as_str()
-                ),
+                initiator_mention,
+                initiator_mention,
                 markdown::escape(initiator_count.to_string().as_str()),
                 initiator_rank,
-                markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
+                target_mention,
                 markdown::escape(target_count.to_string().as_str()),
                 target_rank,
                 cd_messages.join("\n")
@@ -413,29 +497,13 @@ pub async fn process_zw_help_for_user(
     let new_target_count = target_count + 1;
 
     let mut tx = pool.begin().await?;
-    upsert_user(
-        &mut *tx,
-        database_kind,
-        initiator_id,
-        initiator_username,
-        new_initiator_count,
-        now,
-    )
-    .await?;
-    upsert_user(
-        &mut *tx,
-        database_kind,
-        target_id,
-        target_username,
-        new_target_count,
-        now,
-    )
-    .await?;
+    upsert_user(&mut *tx, database_kind, initiator, new_initiator_count, now).await?;
+    upsert_user(&mut *tx, database_kind, target, new_target_count, now).await?;
 
     tx.commit().await?;
 
-    let initiator_rank = get_rank(pool, initiator_id, database_kind).await?;
-    let target_rank = get_rank(pool, target_id, database_kind).await?;
+    let initiator_rank = get_rank(pool, initiator.user_id, database_kind).await?;
+    let target_rank = get_rank(pool, target.user_id, database_kind).await?;
 
     let text = format!(
         "已进行双人运动！\n\n\
@@ -445,8 +513,8 @@ pub async fn process_zw_help_for_user(
 您在自慰排行榜上的位置：{}\n\
 另一位在自慰排行榜上的位置：{}\n\
 下次可进行自慰的时间：30分0秒",
-        markdown::user_mention(UserId(initiator_id as u64), initiator_display_name.as_str()),
-        markdown::user_mention(UserId(target_id as u64), target_display_name.as_str()),
+        initiator_mention,
+        target_mention,
         markdown::escape(new_initiator_count.to_string().as_str()),
         markdown::escape(new_target_count.to_string().as_str()),
         initiator_rank,

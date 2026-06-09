@@ -7,6 +7,7 @@ use crate::services::{build_rank_keyboard, build_rank_text, calculate_page_info}
 use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
 use crate::utils::db::ban_status;
+use crate::utils::db::sync_user_info;
 use crate::utils::fun::eunjeong_generate;
 use crate::utils::get_total_users;
 use crate::utils::logger::log;
@@ -63,6 +64,29 @@ pub async fn inline_query_handler(
         }
         return Ok(());
     }
+    // Sync user info from Telegram to keep it up to date
+    {
+        let user_id = q.from.id.0 as i64;
+        let username = q.from.username.as_deref();
+        let first_name = Some(q.from.first_name.as_str());
+        let last_name = q.from.last_name.as_deref();
+        if let Err(e) = sync_user_info(
+            &pool,
+            database_kind,
+            user_id,
+            username,
+            first_name,
+            last_name,
+        )
+        .await
+        {
+            log(
+                Level::Warn,
+                "inline_query_handler",
+                &format!("Failed to sync user info for {}: {}", user_id, e),
+            );
+        }
+    }
     // Extract page from query if it's a number and not a user_id
     let rank_page = if !query.is_empty() {
         query
@@ -83,10 +107,10 @@ pub async fn inline_query_handler(
             };
             let (_valid_page, offset) = calculate_page_info(total, rank_page);
             let sql = match database_kind {
-                DatabaseKind::Sqlite => "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?",
-                DatabaseKind::Postgres => "SELECT user_id, username, \"count\" FROM users ORDER BY \"count\" DESC, last_time ASC LIMIT $1 OFFSET $2",
-                DatabaseKind::MySql => "SELECT user_id, username, `count` FROM users ORDER BY `count` DESC, last_time ASC LIMIT ? OFFSET ?",
-                DatabaseKind::MariaDb => "SELECT user_id, username, `count` FROM users ORDER BY `count` DESC, last_time ASC LIMIT ? OFFSET ?",
+                DatabaseKind::Sqlite => "SELECT user_id, username, first_name, last_name, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?",
+                DatabaseKind::Postgres => "SELECT user_id, username, first_name, last_name, \"count\" FROM users ORDER BY \"count\" DESC, last_time ASC LIMIT $1 OFFSET $2",
+                DatabaseKind::MySql => "SELECT user_id, username, first_name, last_name, `count` FROM users ORDER BY `count` DESC, last_time ASC LIMIT ? OFFSET ?",
+                DatabaseKind::MariaDb => "SELECT user_id, username, first_name, last_name, `count` FROM users ORDER BY `count` DESC, last_time ASC LIMIT ? OFFSET ?",
             };
             let rows = sqlx::query(sql)
                 .bind(10i64)

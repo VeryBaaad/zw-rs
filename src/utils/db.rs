@@ -9,8 +9,17 @@ use chrono::Duration;
 use log::Level;
 use sqlx::{Any, Row};
 use std::error::Error;
+use teloxide::{prelude::*, utils::markdown};
 
-const CURRENT_DB_VERSION: i32 = 3;
+const CURRENT_DB_VERSION: i32 = 4;
+
+/// Compact user identity used to pass user fields to DB/service functions.
+pub struct UserIdent<'a> {
+    pub user_id: i64,
+    pub username: Option<&'a str>,
+    pub first_name: Option<&'a str>,
+    pub last_name: Option<&'a str>,
+}
 
 fn users_table_exists_sql(kind: DatabaseKind) -> &'static str {
     match kind {
@@ -32,6 +41,8 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
             "CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER NOT NULL UNIQUE,
                 username TEXT NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
                 count INTEGER NOT NULL DEFAULT 0,
                 last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT 0,
@@ -42,6 +53,8 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
             "CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT NOT NULL UNIQUE,
                 username TEXT NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
                 count BIGINT NOT NULL DEFAULT 0,
                 last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT FALSE,
@@ -52,6 +65,8 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
             "CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT NOT NULL UNIQUE,
                 username TEXT NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
                 count BIGINT NOT NULL DEFAULT 0,
                 last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT FALSE,
@@ -95,16 +110,24 @@ fn add_is_banned_sql(kind: DatabaseKind) -> &'static str {
     }
 }
 
+fn add_first_name_sql(_kind: DatabaseKind) -> &'static str {
+    "ALTER TABLE users ADD COLUMN first_name TEXT"
+}
+
+fn add_last_name_sql(_kind: DatabaseKind) -> &'static str {
+    "ALTER TABLE users ADD COLUMN last_name TEXT"
+}
+
 fn upsert_user_sql(kind: DatabaseKind) -> &'static str {
     match kind {
         DatabaseKind::Sqlite => {
-            "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET username = excluded.username, count = excluded.count, last_time = excluded.last_time"
+            "INSERT INTO users (user_id, username, first_name, last_name, count, last_time) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET username = excluded.username, first_name = excluded.first_name, last_name = excluded.last_name, count = excluded.count, last_time = excluded.last_time"
         }
         DatabaseKind::Postgres => {
-            "INSERT INTO users (user_id, username, count, last_time) VALUES ($1, $2, $3, $4) ON CONFLICT(user_id) DO UPDATE SET username = excluded.username, count = excluded.count, last_time = excluded.last_time"
+            "INSERT INTO users (user_id, username, first_name, last_name, count, last_time) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT(user_id) DO UPDATE SET username = excluded.username, first_name = excluded.first_name, last_name = excluded.last_name, count = excluded.count, last_time = excluded.last_time"
         }
         DatabaseKind::MySql | DatabaseKind::MariaDb => {
-            "INSERT INTO users (user_id, username, count, last_time) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), count = VALUES(count), last_time = VALUES(last_time)"
+            "INSERT INTO users (user_id, username, first_name, last_name, count, last_time) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), first_name = VALUES(first_name), last_name = VALUES(last_name), count = VALUES(count), last_time = VALUES(last_time)"
         }
     }
 }
@@ -317,6 +340,33 @@ async fn upgrade_database(pool: &DbPool, from_version: i32, database_kind: Datab
         v = 3;
     }
 
+    if v == 3 {
+        log(
+            Level::Info,
+            "init_database",
+            "Running migration v3 -> v4: adding first_name and last_name columns",
+        );
+        if !column_exists(pool, database_kind, "first_name")
+            .await
+            .unwrap_or(true)
+        {
+            sqlx::query(add_first_name_sql(database_kind))
+                .execute(pool)
+                .await
+                .expect("Failed to add first_name column");
+        }
+        if !column_exists(pool, database_kind, "last_name")
+            .await
+            .unwrap_or(true)
+        {
+            sqlx::query(add_last_name_sql(database_kind))
+                .execute(pool)
+                .await
+                .expect("Failed to add last_name column");
+        }
+        v = 4;
+    }
+
     sqlx::query(update_db_version_sql(database_kind))
         .bind(v)
         .execute(pool)
@@ -526,8 +576,7 @@ pub async fn delete_user(
 pub async fn upsert_user<'a, E>(
     pool: E,
     database_kind: DatabaseKind,
-    user_id: i64,
-    username: &str,
+    user: &UserIdent<'_>,
     new_count: i64,
     now: i64,
 ) -> Result<(), sqlx::Error>
@@ -540,8 +589,10 @@ where
         "Inserting/updating user in database",
     );
     if let Err(e) = sqlx::query(upsert_user_sql(database_kind))
-        .bind(user_id)
-        .bind(username)
+        .bind(user.user_id)
+        .bind(user.username)
+        .bind(user.first_name)
+        .bind(user.last_name)
         .bind(new_count)
         .bind(now)
         .execute(pool)
@@ -662,12 +713,22 @@ pub async fn get_user_count_and_last_time(
     }
 }
 
-/// Find user by ID or username, returns (count, last_time, username, user_id)
+/// Find user by ID or username, returns (count, last_time, username, first_name, last_name, user_id)
 pub async fn find_user_by_id_or_username(
     pool: &DbPool,
     database_kind: DatabaseKind,
     key: &str,
-) -> Result<Option<(i64, Option<i64>, String, i64)>, Box<dyn Error + Send + Sync>> {
+) -> Result<
+    Option<(
+        i64,
+        Option<i64>,
+        String,
+        Option<String>,
+        Option<String>,
+        i64,
+    )>,
+    Box<dyn Error + Send + Sync>,
+> {
     log(
         Level::Debug,
         "find_user_by_id_or_username",
@@ -676,12 +737,12 @@ pub async fn find_user_by_id_or_username(
 
     let (sql_by_id, sql_by_name) = match database_kind {
         DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => (
-            "SELECT count, last_time, username, user_id FROM users WHERE user_id = ?",
-            "SELECT count, last_time, username, user_id FROM users WHERE username = ?",
+            "SELECT count, last_time, username, first_name, last_name, user_id FROM users WHERE user_id = ?",
+            "SELECT count, last_time, username, first_name, last_name, user_id FROM users WHERE username = ?",
         ),
         DatabaseKind::Postgres => (
-            "SELECT count, last_time, username, user_id FROM users WHERE user_id = $1",
-            "SELECT count, last_time, username, user_id FROM users WHERE username = $1",
+            "SELECT count, last_time, username, first_name, last_name, user_id FROM users WHERE user_id = $1",
+            "SELECT count, last_time, username, first_name, last_name, user_id FROM users WHERE username = $1",
         ),
     };
 
@@ -690,8 +751,12 @@ pub async fn find_user_by_id_or_username(
             let count: i64 = row.try_get("count")?;
             let last_time: Option<i64> = row.try_get("last_time").ok();
             let username: String = row.try_get("username")?;
+            let first_name: Option<String> = row.try_get("first_name").ok();
+            let last_name: Option<String> = row.try_get("last_name").ok();
             let user_id: i64 = row.try_get("user_id")?;
-            return Ok(Some((count, last_time, username, user_id)));
+            return Ok(Some((
+                count, last_time, username, first_name, last_name, user_id,
+            )));
         }
         return Ok(None);
     }
@@ -705,11 +770,151 @@ pub async fn find_user_by_id_or_username(
         let count: i64 = row.try_get("count")?;
         let last_time: Option<i64> = row.try_get("last_time").ok();
         let username: String = row.try_get("username")?;
+        let first_name: Option<String> = row.try_get("first_name").ok();
+        let last_name: Option<String> = row.try_get("last_name").ok();
         let user_id: i64 = row.try_get("user_id")?;
-        Ok(Some((count, last_time, username, user_id)))
+        Ok(Some((
+            count, last_time, username, first_name, last_name, user_id,
+        )))
     } else {
         Ok(None)
     }
+}
+
+/// Sync user info (username, first_name, last_name) from a Telegram user to the database.
+/// Updates any fields that differ from stored values, and returns whether any update was made.
+pub async fn sync_user_info(
+    pool: &DbPool,
+    database_kind: DatabaseKind,
+    user_id: i64,
+    username: Option<&str>,
+    first_name: Option<&str>,
+    last_name: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let row = sqlx::query(match database_kind {
+        DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "SELECT username, first_name, last_name FROM users WHERE user_id = ?"
+        }
+        DatabaseKind::Postgres => {
+            "SELECT username, first_name, last_name FROM users WHERE user_id = $1"
+        }
+    })
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(row) = row {
+        let stored_username: String = row.try_get("username").unwrap_or_default();
+        let stored_first_name: Option<String> = row.try_get("first_name").ok();
+        let stored_last_name: Option<String> = row.try_get("last_name").ok();
+
+        let new_username = username.unwrap_or("");
+        let username_changed = stored_username != new_username;
+        let first_name_changed = stored_first_name.as_deref() != first_name;
+        let last_name_changed = stored_last_name.as_deref() != last_name;
+
+        if username_changed || first_name_changed || last_name_changed {
+            log(
+                Level::Debug,
+                "sync_user_info",
+                &format!(
+                    "Updating user info for {}: username={}, fn={}, ln={})",
+                    user_id,
+                    if username_changed {
+                        "changed"
+                    } else {
+                        "unchanged"
+                    },
+                    if first_name_changed {
+                        "changed"
+                    } else {
+                        "unchanged"
+                    },
+                    if last_name_changed {
+                        "changed"
+                    } else {
+                        "unchanged"
+                    },
+                ),
+            );
+            sqlx::query(match database_kind {
+                DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+                    "UPDATE users SET username = ?, first_name = ?, last_name = ? WHERE user_id = ?"
+                }
+                DatabaseKind::Postgres => {
+                    "UPDATE users SET username = $1, first_name = $2, last_name = $3 WHERE user_id = $4"
+                }
+            })
+            .bind(new_username)
+            .bind(first_name)
+            .bind(last_name)
+            .bind(user_id)
+            .execute(pool)
+            .await?;
+        }
+    } else {
+        // User doesn't exist yet, insert a placeholder row (count=0, last_time=0)
+        log(
+            Level::Debug,
+            "sync_user_info",
+            &format!("User {} not in DB, inserting placeholder", user_id),
+        );
+        upsert_user(
+            pool,
+            database_kind,
+            &UserIdent {
+                user_id,
+                username,
+                first_name,
+                last_name,
+            },
+            0,
+            0,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// Build the best display name for a user with automatic fallback.
+/// Priority: full name (first_name + last_name, Telegram style) → username → user_id
+pub fn get_user_display_name(
+    first_name: Option<&str>,
+    last_name: Option<&str>,
+    username: Option<&str>,
+    user_id: i64,
+) -> String {
+    let full_name = match (
+        first_name.filter(|s| !s.is_empty()),
+        last_name.filter(|s| !s.is_empty()),
+    ) {
+        (Some(f), Some(l)) => Some(format!("{} {}", f, l)),
+        (Some(f), None) => Some(f.to_string()),
+        (None, Some(l)) => Some(l.to_string()),
+        (None, None) => None,
+    };
+
+    if let Some(name) = full_name {
+        name
+    } else if let Some(uname) = username.filter(|s| !s.is_empty()) {
+        format!("@{}", uname)
+    } else {
+        user_id.to_string()
+    }
+}
+
+/// Format a user mention link for MarkdownV2 with automatic fallback.
+/// Priority: full name (first_name + last_name) → username → user_id
+/// The returned string is already escaped and wrapped in a markdown user mention link.
+pub fn format_user_mention(
+    user_id: i64,
+    first_name: Option<&str>,
+    last_name: Option<&str>,
+    username: Option<&str>,
+) -> String {
+    let display = get_user_display_name(first_name, last_name, username, user_id);
+    markdown::user_mention(UserId(user_id as u64), &markdown::escape(&display))
 }
 
 /// Cooldown status check result
