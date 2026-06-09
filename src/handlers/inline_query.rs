@@ -159,7 +159,7 @@ pub async fn inline_query_handler(
         "排行榜",
         InputMessageContent::Text(teloxide::types::InputMessageContentText {
             message_text: rank_text,
-            parse_mode: None,
+            parse_mode: Some(teloxide::types::ParseMode::MarkdownV2),
             entities: None,
             link_preview_options: None,
         }),

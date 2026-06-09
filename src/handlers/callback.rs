@@ -89,6 +89,7 @@ pub async fn callback_handler(
                 if let Err(e) = bot
                     .edit_message_text_inline(inline_id.as_str(), text)
                     .reply_markup(keyboard)
+                    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                     .await
                 {
                     log(
