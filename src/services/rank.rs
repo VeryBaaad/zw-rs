@@ -44,7 +44,7 @@ pub fn build_rank_text(rows: &[DbRow], offset: i64) -> Result<String, sqlx::Erro
                 UserId(user_id as u64),
                 &markdown::escape(username.as_str()).as_str()
             ),
-            count
+            markdown::escape(count.to_string().as_str())
         ));
     }
     Ok(text)
