@@ -5,7 +5,9 @@
 use crate::services::{handle_rank, handle_zw};
 use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
-use crate::utils::db::{ban_status, delete_user, is_admin, set_user_count, set_user_last_time};
+use crate::utils::db::{
+    ban_status, delete_user, is_admin, set_user_count, set_user_last_time, sync_user_info,
+};
 use crate::utils::fun::eunjeong_generate;
 use crate::utils::logger::log;
 use log::Level;
@@ -76,6 +78,31 @@ pub async fn commands_handler(
         let millis: u64 = rng().random_range(3000..=10000);
         sleep(Duration::from_millis(millis)).await;
     }
+
+    // Sync user info from Telegram to keep it up to date
+    if let Some(user) = msg.from.as_ref() {
+        let user_id = user.id.0 as i64;
+        let username = user.username.as_deref();
+        let first_name = Some(user.first_name.as_str());
+        let last_name = user.last_name.as_deref();
+        if let Err(e) = sync_user_info(
+            &pool,
+            database_kind,
+            user_id,
+            username,
+            first_name,
+            last_name,
+        )
+        .await
+        {
+            log(
+                Level::Warn,
+                "commands_handler",
+                &format!("Failed to sync user info for {}: {}", user_id, e),
+            );
+        }
+    }
+
     match cmd {
         Command::Zw(arg) => {
             let arg = arg.trim();

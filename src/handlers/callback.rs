@@ -71,10 +71,10 @@ pub async fn callback_handler(
 
                 let rank_query = match database_kind {
                     DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
-                        "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
+                        "SELECT user_id, username, first_name, last_name, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
                     }
                     DatabaseKind::Postgres => {
-                        "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT $1 OFFSET $2"
+                        "SELECT user_id, username, first_name, last_name, count FROM users ORDER BY count DESC, last_time ASC LIMIT $1 OFFSET $2"
                     }
                 };
                 let rows = sqlx::query(rank_query)
@@ -144,13 +144,37 @@ pub async fn callback_handler(
 
             let from = &q.from;
             let user_id = from.id.0 as i64;
-            let username = from.username.as_deref().unwrap_or("未知用户");
-            let display_name = match from.last_name.as_deref() {
-                Some(last) => format!("{} {}", from.first_name.clone(), last),
-                None => from.first_name.clone(),
-            };
+            let username = from.username.as_deref();
+            let first_name = Some(from.first_name.as_str());
+            let last_name = from.last_name.as_deref();
 
-            match process_zw_for_user(&pool, database_kind, user_id, username, &display_name).await
+            // Sync user info from Telegram
+            if let Err(e) = crate::utils::db::sync_user_info(
+                &pool,
+                database_kind,
+                user_id,
+                username,
+                first_name,
+                last_name,
+            )
+            .await
+            {
+                log(
+                    Level::Warn,
+                    "callback_handler",
+                    &format!("Failed to sync user info for {}: {}", user_id, e),
+                );
+            }
+
+            match process_zw_for_user(
+                &pool,
+                database_kind,
+                user_id,
+                username,
+                first_name,
+                last_name,
+            )
+            .await
             {
                 Ok((text, _)) => {
                     if let Some(msg) = &q.message {
@@ -261,32 +285,57 @@ pub async fn callback_handler(
                         return Ok(());
                     }
 
-                    let initiator_username = from.username.as_deref().unwrap_or("未知用户");
-                    let initiator_name = match from.last_name.as_deref() {
-                        Some(last) => format!("{} {}", from.first_name.clone(), last),
-                        None => from.first_name.clone(),
-                    };
+                    let initiator_username = from.username.as_deref();
+                    let initiator_first_name = Some(from.first_name.as_str());
+                    let initiator_last_name = from.last_name.as_deref();
 
-                    let target_username =
-                        match sqlx::query("SELECT username FROM users WHERE user_id = ?")
-                            .bind(target_id)
-                            .fetch_optional(&pool)
-                            .await
-                        {
-                            Ok(Some(row)) => row
-                                .try_get::<String, _>("username")
-                                .unwrap_or_else(|_| "User".to_string()),
-                            _ => "User".to_string(),
-                        };
+                    // Sync initiator user info
+                    if let Err(e) = crate::utils::db::sync_user_info(
+                        &pool,
+                        database_kind,
+                        actual_initiator_id,
+                        initiator_username,
+                        initiator_first_name,
+                        initiator_last_name,
+                    )
+                    .await
+                    {
+                        log(
+                            Level::Warn,
+                            "callback_handler",
+                            &format!(
+                                "Failed to sync initiator info for {}: {}",
+                                actual_initiator_id, e
+                            ),
+                        );
+                    }
+
+                    let (target_username, target_first_name, target_last_name) = match sqlx::query(
+                        "SELECT username, first_name, last_name FROM users WHERE user_id = ?",
+                    )
+                    .bind(target_id)
+                    .fetch_optional(&pool)
+                    .await
+                    {
+                        Ok(Some(row)) => (
+                            row.try_get::<String, _>("username").ok(),
+                            row.try_get::<String, _>("first_name").ok(),
+                            row.try_get::<String, _>("last_name").ok(),
+                        ),
+                        _ => (None, None, None),
+                    };
 
                     match process_zw_help_for_user(
                         &pool,
                         database_kind,
                         actual_initiator_id,
                         initiator_username,
-                        &initiator_name,
+                        initiator_first_name,
+                        initiator_last_name,
                         target_id,
-                        &target_username,
+                        target_username.as_deref(),
+                        target_first_name.as_deref(),
+                        target_last_name.as_deref(),
                     )
                     .await
                     {

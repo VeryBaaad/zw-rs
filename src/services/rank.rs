@@ -4,7 +4,7 @@
  */
 use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
-use crate::utils::{DbPool, DbRow};
+use crate::utils::{DbPool, DbRow, format_user_mention};
 use log::Level;
 use sqlx::Row;
 use std::error::Error;
@@ -34,16 +34,21 @@ pub fn build_rank_text(rows: &[DbRow], offset: i64) -> Result<String, sqlx::Erro
     let mut text = RANK_TITLE.to_string();
     for (i, row) in rows.iter().enumerate() {
         let rank = (offset + i as i64 + 1) as usize;
-        let username: String = row.try_get("username")?;
+        let username: Option<String> = row.try_get("username").ok();
+        let first_name: Option<String> = row.try_get("first_name").ok();
+        let last_name: Option<String> = row.try_get("last_name").ok();
         let count: i64 = row.try_get("count")?;
         let user_id: i64 = row.try_get("user_id")?;
+        let mention = format_user_mention(
+            user_id,
+            first_name.as_deref(),
+            last_name.as_deref(),
+            username.as_deref(),
+        );
         text.push_str(&format!(
             "{}\\. {}: {}次\n",
             rank,
-            markdown::user_mention(
-                UserId(user_id as u64),
-                markdown::escape(username.as_str()).as_str()
-            ),
+            mention,
             markdown::escape(count.to_string().as_str())
         ));
     }
@@ -111,10 +116,10 @@ pub async fn handle_rank(
     log(Level::Debug, "handle_rank", "Querying users from database");
     let rank_query = match database_kind {
         DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
-            "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
+            "SELECT user_id, username, first_name, last_name, count FROM users ORDER BY count DESC, last_time ASC LIMIT ? OFFSET ?"
         }
         DatabaseKind::Postgres => {
-            "SELECT user_id, username, count FROM users ORDER BY count DESC, last_time ASC LIMIT $1 OFFSET $2"
+            "SELECT user_id, username, first_name, last_name, count FROM users ORDER BY count DESC, last_time ASC LIMIT $1 OFFSET $2"
         }
     };
     let rows = sqlx::query(rank_query)
