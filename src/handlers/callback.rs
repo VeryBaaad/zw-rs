@@ -187,6 +187,7 @@ pub async fn callback_handler(
                         let message_id = msg.id();
                         if let Err(e) = bot
                             .edit_message_text(chat_id, message_id, text.clone())
+                            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                             .await
                         {
                             log(
@@ -194,7 +195,11 @@ pub async fn callback_handler(
                                 "callback_handler",
                                 &format!("edit_message_text failed: {}", e),
                             );
-                            if let Err(e2) = bot.send_message(chat_id, text.clone()).await {
+                            if let Err(e2) = bot
+                                .send_message(chat_id, text.clone())
+                                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                .await
+                            {
                                 log(
                                     Level::Error,
                                     "callback_handler",
@@ -208,7 +213,10 @@ pub async fn callback_handler(
                             "callback_handler",
                             &format!("zw_self: editing inline_message_id {}", inline_id),
                         );
-                        if let Err(e) = bot.edit_message_text_inline(inline_id, text.clone()).await
+                        if let Err(e) = bot
+                            .edit_message_text_inline(inline_id, text.clone())
+                            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                            .await
                         {
                             log(
                                 Level::Error,
@@ -222,7 +230,11 @@ pub async fn callback_handler(
                             "callback_handler",
                             "zw_self: no q.message and no inline_message_id, sending DM",
                         );
-                        if let Err(e) = bot.send_message(ChatId(user_id), text.clone()).await {
+                        if let Err(e) = bot
+                            .send_message(ChatId(user_id), text.clone())
+                            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                            .await
+                        {
                             log(
                                 Level::Error,
                                 "callback_handler",
