@@ -263,7 +263,7 @@ pub async fn handle_zw_self(
         );
         let rank = get_rank(&pool, user_id, database_kind).await?;
         let text = format!(
-            "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
+            "{}，杂鱼杂鱼，已经达到顶峰了呢\\~\n\n\
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
@@ -367,7 +367,7 @@ pub async fn process_zw_for_user(
     if cd_status.is_in_cooldown {
         let rank = get_rank(pool, user_id, database_kind).await.unwrap_or(0);
         let text = format!(
-            "{}，杂鱼杂鱼，已经达到顶峰了呢~\n\n\
+            "{}，杂鱼杂鱼，已经达到顶峰了呢\\~\n\n\
 您在自慰排行榜上的位置：{}\n\
 总次数：{}次\n\
 下次可进行自慰的时间：{}分{}秒",
