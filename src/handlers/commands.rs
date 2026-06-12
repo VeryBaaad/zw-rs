@@ -2,6 +2,7 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
+use crate::i18n::{Locale, get_translation};
 use crate::services::{handle_rank, handle_zw};
 use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
@@ -38,6 +39,19 @@ pub async fn commands_handler(
     database_kind: DatabaseKind,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(
+        Level::Debug,
+        "i18n",
+        &format!(
+            "user {} language_code: {:?}",
+            msg.from.as_ref().map_or(0, |u| u.id.0),
+            msg.from.as_ref().and_then(|u| u.language_code.as_deref())
+        ),
+    );
+    let locale =
+        Locale::from_language_code(msg.from.as_ref().and_then(|u| u.language_code.as_deref()));
+    let t = get_translation(locale);
+
+    log(
         Level::Info,
         "commands_handler",
         &format!("Received command: {:?}", cmd),
@@ -59,12 +73,9 @@ pub async fn commands_handler(
                 cmd
             ),
         );
-        bot.send_message(
-            msg.chat.id,
-            "You have been permanently banned\n您已被永久封禁",
-        )
-        .reply_parameters(ReplyParameters::new(msg.id))
-        .await?;
+        bot.send_message(msg.chat.id, t.banned_message())
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await?;
         return Ok(());
     }
     if ban_status(
@@ -112,14 +123,14 @@ pub async fn commands_handler(
                     "commands_handler",
                     "No argument provided for zw command, treating as empty",
                 );
-                handle_zw(bot, msg, pool, database_kind, None).await?
+                handle_zw(bot, msg, pool, database_kind, locale, None).await?
             } else {
                 log(
                     Level::Debug,
                     "commands_handler",
                     &format!("Received argument for zw command: '{}'", arg),
                 );
-                handle_zw(bot, msg, pool, database_kind, Some(arg.to_string())).await?
+                handle_zw(bot, msg, pool, database_kind, locale, Some(arg.to_string())).await?
             }
         }
         Command::Rank(arg) => {
@@ -144,6 +155,7 @@ pub async fn commands_handler(
                 Some(msg.id),
                 pool,
                 database_kind,
+                locale,
                 page,
             )
             .await?;
@@ -171,35 +183,31 @@ pub async fn commands_handler(
                     .await
                     .unwrap_or(false)
                 {
-                    bot.send_message(msg.chat.id, "Permission denied.").await?;
+                    bot.send_message(msg.chat.id, t.permission_denied()).await?;
                     return Ok(());
                 }
                 let parts: Vec<&str> = arg.split_whitespace().collect();
                 if parts.len() != 2 {
-                    bot.send_message(msg.chat.id, "Usage: /set <user_id> <count>")
-                        .await?;
+                    bot.send_message(msg.chat.id, t.set_usage()).await?;
                     return Ok(());
                 }
                 let target_id: i64 = match parts[0].parse() {
                     Ok(id) => id,
                     Err(_) => {
-                        bot.send_message(msg.chat.id, "Invalid user ID.").await?;
+                        bot.send_message(msg.chat.id, t.invalid_user_id()).await?;
                         return Ok(());
                     }
                 };
                 let count: i64 = match parts[1].parse() {
                     Ok(c) => c,
                     Err(_) => {
-                        bot.send_message(msg.chat.id, "Invalid count.").await?;
+                        bot.send_message(msg.chat.id, t.invalid_count()).await?;
                         return Ok(());
                     }
                 };
                 set_user_count(&pool, database_kind, target_id, count).await?;
-                bot.send_message(
-                    msg.chat.id,
-                    format!("User {} count set to {}.", target_id, count),
-                )
-                .await?;
+                bot.send_message(msg.chat.id, t.user_count_set(target_id, count))
+                    .await?;
             }
         }
         Command::Reset(arg) => {
@@ -215,19 +223,18 @@ pub async fn commands_handler(
                     ),
                 );
                 if !admin_result.unwrap_or(false) {
-                    bot.send_message(msg.chat.id, "Permission denied.").await?;
+                    bot.send_message(msg.chat.id, t.permission_denied()).await?;
                     return Ok(());
                 }
                 let target_id: i64 = match arg.trim().parse() {
                     Ok(id) => id,
                     Err(_) => {
-                        bot.send_message(msg.chat.id, "Usage: /reset <user_id>")
-                            .await?;
+                        bot.send_message(msg.chat.id, t.reset_usage()).await?;
                         return Ok(());
                     }
                 };
                 delete_user(&pool, database_kind, target_id).await?;
-                bot.send_message(msg.chat.id, format!("User {} removed.", target_id))
+                bot.send_message(msg.chat.id, t.user_removed(target_id))
                     .await?;
             }
         }
@@ -238,23 +245,19 @@ pub async fn commands_handler(
                     .await
                     .unwrap_or(false)
                 {
-                    bot.send_message(msg.chat.id, "Permission denied.").await?;
+                    bot.send_message(msg.chat.id, t.permission_denied()).await?;
                     return Ok(());
                 }
                 let target_id: i64 = match arg.trim().parse() {
                     Ok(id) => id,
                     Err(_) => {
-                        bot.send_message(msg.chat.id, "Usage: /continue <user_id>")
-                            .await?;
+                        bot.send_message(msg.chat.id, t.continue_usage()).await?;
                         return Ok(());
                     }
                 };
                 set_user_last_time(&pool, database_kind, target_id).await?;
-                bot.send_message(
-                    msg.chat.id,
-                    format!("User {} last_time set to 0.", target_id),
-                )
-                .await?;
+                bot.send_message(msg.chat.id, t.user_last_time_set(target_id))
+                    .await?;
             }
         }
     }

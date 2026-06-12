@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 use crate::handlers::commands::get_version_info;
+use crate::i18n::{Locale, get_translation};
 use crate::services::{build_rank_keyboard, build_rank_text, calculate_page_info};
 use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
@@ -30,6 +31,17 @@ pub async fn inline_query_handler(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(
         Level::Debug,
+        "i18n",
+        &format!(
+            "user {} language_code: {:?}",
+            q.from.id, q.from.language_code
+        ),
+    );
+    let locale = Locale::from_language_code(q.from.language_code.as_deref());
+    let t = get_translation(locale);
+
+    log(
+        Level::Debug,
         "inline_query_handler",
         &format!("Received inline query: '{}'", q.query),
     );
@@ -40,15 +52,15 @@ pub async fn inline_query_handler(
     if ban_status(&pool, database_kind, q.from.id.0 as i64).await? == 1 {
         let ban_article = InlineQueryResultArticle::new(
             "banned",
-            "You have been permanently banned",
+            t.banned_message(),
             InputMessageContent::Text(teloxide::types::InputMessageContentText {
-                message_text: "You have been permanently banned\n您已被永久封禁".to_string(),
+                message_text: t.banned_message().to_string(),
                 parse_mode: None,
                 entities: None,
                 link_preview_options: None,
             }),
         )
-        .description("您已被永久封禁");
+        .description(t.banned_message());
         results.push(InlineQueryResult::Article(ban_article));
         if let Err(e) = bot
             .answer_inline_query(q.id, results)
@@ -119,29 +131,29 @@ pub async fn inline_query_handler(
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
-            build_rank_text(&rows, offset)
+            build_rank_text(&rows, offset, locale)
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)
         }.await {
             Ok(t) => t,
             Err(e) => {
                 log(Level::Error, "inline_query_handler", &format!("Generate rank text error: {}", e));
-                "排行榜加载失败".to_string()
+                t.rank_load_failed().to_string()
             }
         }
     }.await;
 
     let initiator_id = q.from.id.0 as i64;
-    let zw_text = "点击下方按钮进行紫薇\n直接爽4！";
+    let zw_text = t.inline_zw_text();
     let mut zw_kb = teloxide::types::InlineKeyboardMarkup::default();
     zw_kb
         .inline_keyboard
         .push(vec![teloxide::types::InlineKeyboardButton::callback(
-            "自慰",
+            t.inline_zw_title(),
             format!("zw_self_{}", initiator_id),
         )]);
     let zw_article = InlineQueryResultArticle::new(
         format!("zw_{}", chrono::Utc::now().timestamp_millis()),
-        "自慰",
+        t.inline_zw_title(),
         InputMessageContent::Text(teloxide::types::InputMessageContentText {
             message_text: zw_text.to_string(),
             parse_mode: None,
@@ -149,7 +161,7 @@ pub async fn inline_query_handler(
             link_preview_options: None,
         }),
     )
-    .description("30分钟进行一次")
+    .description(t.inline_zw_description())
     .reply_markup(zw_kb);
     results.push(InlineQueryResult::Article(zw_article));
 
@@ -176,11 +188,11 @@ pub async fn inline_query_handler(
                 0
             }
         };
-        build_rank_keyboard(rank_page, total)
+        build_rank_keyboard(rank_page, total, locale)
     };
     let rank_article = InlineQueryResultArticle::new(
         format!("rank_{}", chrono::Utc::now().timestamp_millis()),
-        "排行榜",
+        t.inline_rank_title(),
         InputMessageContent::Text(teloxide::types::InputMessageContentText {
             message_text: rank_text,
             parse_mode: Some(teloxide::types::ParseMode::MarkdownV2),
@@ -188,7 +200,7 @@ pub async fn inline_query_handler(
             link_preview_options: None,
         }),
     )
-    .description("谁更多")
+    .description(t.inline_rank_description())
     .reply_markup(rank_keyboard);
     log(
         Level::Debug,
@@ -204,7 +216,7 @@ pub async fn inline_query_handler(
     let version_info = get_version_info().await?;
     let version_article = InlineQueryResultArticle::new(
         format!("version_{}", chrono::Utc::now().timestamp_millis()),
-        "Bot 版本",
+        t.inline_version_title(),
         InputMessageContent::Text(teloxide::types::InputMessageContentText {
             message_text: version_info,
             parse_mode: None,
@@ -212,17 +224,18 @@ pub async fn inline_query_handler(
             link_preview_options: None,
         }),
     )
-    .description("查看当前Bot版本");
+    .description(t.inline_version_description());
     results.push(InlineQueryResult::Article(version_article));
 
     if !query.is_empty()
         && let Ok(count) = query.parse::<usize>()
         && count <= 100
     {
-        let eunjeong_text = "恩！情！\n".to_string() + &eunjeong_generate(Some(count)).await;
+        let eunjeong_text =
+            t.inline_eunjeong_prefix().to_string() + &eunjeong_generate(Some(count)).await;
         let eunjeong_article = InlineQueryResultArticle::new(
             format!("eunjeong_{}", chrono::Utc::now().timestamp_millis()),
-            "恩！情！",
+            t.inline_eunjeong_title(),
             InputMessageContent::Text(teloxide::types::InputMessageContentText {
                 message_text: eunjeong_text,
                 parse_mode: None,
@@ -230,13 +243,13 @@ pub async fn inline_query_handler(
                 link_preview_options: None,
             }),
         )
-        .description("Eun! Jeong!");
+        .description(t.inline_eunjeong_description());
         results.push(InlineQueryResult::Article(eunjeong_article));
     } else {
-        let eunjeong_text = "恩！情！\n".to_string() + &eunjeong_generate(None).await;
+        let eunjeong_text = t.inline_eunjeong_prefix().to_string() + &eunjeong_generate(None).await;
         let eunjeong_article = InlineQueryResultArticle::new(
             format!("eunjeong_{}", chrono::Utc::now().timestamp_millis()),
-            "恩！情！",
+            t.inline_eunjeong_title(),
             InputMessageContent::Text(teloxide::types::InputMessageContentText {
                 message_text: eunjeong_text,
                 parse_mode: None,
@@ -244,7 +257,7 @@ pub async fn inline_query_handler(
                 link_preview_options: None,
             }),
         )
-        .description("Eun! Jeong!");
+        .description(t.inline_eunjeong_description());
         results.push(InlineQueryResult::Article(eunjeong_article));
     }
 
@@ -256,14 +269,14 @@ pub async fn inline_query_handler(
         let mut kb = teloxide::types::InlineKeyboardMarkup::default();
         kb.inline_keyboard
             .push(vec![teloxide::types::InlineKeyboardButton::callback(
-                "自慰 (目标)",
+                t.inline_zw_target_button(),
                 format!("zw_user_{}_{}", user_id, initiator_id),
             )]);
         let art = InlineQueryResultArticle::new(
             format!("zw_user_{}_{}", user_id, initiator_id),
-            format!("自慰 {}", user_id),
+            t.inline_zw_target_title_fmt(user_id),
             InputMessageContent::Text(teloxide::types::InputMessageContentText {
-                message_text: format!("对用户 {} 的操作", user_id),
+                message_text: t.inline_zw_target_message_fmt(user_id),
                 parse_mode: None,
                 entities: None,
                 link_preview_options: None,

@@ -2,6 +2,7 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
+use crate::i18n::{Locale, get_translation};
 use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
 use crate::utils::{DbPool, DbRow, format_user_mention};
@@ -11,11 +12,9 @@ use std::error::Error;
 use teloxide::{
     prelude::*,
     types::{InlineKeyboardMarkup, MessageId, ReplyParameters},
-    utils::markdown,
 };
 
 const PER_PAGE: i64 = 10;
-const RANK_TITLE: &str = "自慰排行榜\n\n";
 
 /// Calculate pagination info from total count and page number
 pub fn calculate_page_info(total: usize, page: usize) -> (usize, i64) {
@@ -30,8 +29,9 @@ pub fn calculate_page_info(total: usize, page: usize) -> (usize, i64) {
 }
 
 /// Build rank text from database rows
-pub fn build_rank_text(rows: &[DbRow], offset: i64) -> Result<String, sqlx::Error> {
-    let mut text = RANK_TITLE.to_string();
+pub fn build_rank_text(rows: &[DbRow], offset: i64, locale: Locale) -> Result<String, sqlx::Error> {
+    let t = get_translation(locale);
+    let mut text = t.rank_title().to_string();
     for (i, row) in rows.iter().enumerate() {
         let rank = (offset + i as i64 + 1) as usize;
         let username: Option<String> = row.try_get("username").ok();
@@ -45,29 +45,29 @@ pub fn build_rank_text(rows: &[DbRow], offset: i64) -> Result<String, sqlx::Erro
             last_name.as_deref(),
             username.as_deref(),
         );
-        text.push_str(&format!(
-            "{}\\. {}: {}次\n",
-            rank,
-            mention,
-            markdown::escape(count.to_string().as_str())
-        ));
+        text.push_str(&t.rank_line(rank, &mention, count));
     }
     Ok(text)
 }
 
 /// Build pagination keyboard
-pub fn build_rank_keyboard(valid_page: usize, total: usize) -> InlineKeyboardMarkup {
+pub fn build_rank_keyboard(
+    valid_page: usize,
+    total: usize,
+    locale: Locale,
+) -> InlineKeyboardMarkup {
+    let t = get_translation(locale);
     let mut keyboard = InlineKeyboardMarkup::default();
     let mut row = Vec::new();
     if valid_page > 0 {
         row.push(teloxide::types::InlineKeyboardButton::callback(
-            "上一页",
+            t.rank_prev_page(),
             format!("rank_{}", valid_page - 1),
         ));
     }
     if (valid_page + 1) * (PER_PAGE as usize) < total {
         row.push(teloxide::types::InlineKeyboardButton::callback(
-            "下一页",
+            t.rank_next_page(),
             format!("rank_{}", valid_page + 1),
         ));
     }
@@ -77,6 +77,7 @@ pub fn build_rank_keyboard(valid_page: usize, total: usize) -> InlineKeyboardMar
     keyboard
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_rank(
     bot: Bot,
     chat_id: ChatId,
@@ -84,6 +85,7 @@ pub async fn handle_rank(
     reply_to: Option<MessageId>,
     pool: DbPool,
     database_kind: DatabaseKind,
+    locale: Locale,
     page: usize,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(
@@ -133,8 +135,8 @@ pub async fn handle_rank(
         &format!("Retrieved {} users from database", rows.len()),
     );
 
-    let text = build_rank_text(&rows, offset)?;
-    let keyboard = build_rank_keyboard(valid_page, total);
+    let text = build_rank_text(&rows, offset, locale)?;
+    let keyboard = build_rank_keyboard(valid_page, total, locale);
 
     if let Some(message_id) = message_id {
         log(Level::Debug, "handle_rank", "Editing existing rank message");

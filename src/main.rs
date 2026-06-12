@@ -4,6 +4,7 @@
  */
 
 mod handlers;
+mod i18n;
 mod services;
 mod utils;
 #[cfg(target_os = "windows")]

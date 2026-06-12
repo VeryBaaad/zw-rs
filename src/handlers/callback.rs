@@ -2,6 +2,7 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
+use crate::i18n::{Locale, get_translation};
 use crate::services::{
     build_rank_keyboard, build_rank_text, calculate_page_info, handle_rank, process_zw_for_user,
     process_zw_help_for_user,
@@ -20,7 +21,18 @@ pub async fn callback_handler(
     pool: DbPool,
     database_kind: DatabaseKind,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let locale = Locale::from_language_code(q.from.language_code.as_deref());
+    let t = get_translation(locale);
+
     if let Some(data) = &q.data {
+        log(
+            Level::Debug,
+            "i18n",
+            &format!(
+                "user {} language_code: {:?}",
+                q.from.id, q.from.language_code
+            ),
+        );
         log(
             Level::Debug,
             "callback_handler",
@@ -46,6 +58,7 @@ pub async fn callback_handler(
                     None,
                     pool.clone(),
                     database_kind,
+                    locale,
                     page,
                 )
                 .await
@@ -83,8 +96,8 @@ pub async fn callback_handler(
                     .fetch_all(&pool)
                     .await?;
 
-                let text = build_rank_text(&rows, offset)?;
-                let keyboard = build_rank_keyboard(valid_page, total);
+                let text = build_rank_text(&rows, offset, locale)?;
+                let keyboard = build_rank_keyboard(valid_page, total, locale);
 
                 if let Err(e) = bot
                     .edit_message_text_inline(inline_id.as_str(), text)
@@ -137,7 +150,7 @@ pub async fn callback_handler(
                 let _ = bot
                     .answer_callback_query(q.id)
                     .show_alert(true)
-                    .text("只有发起人可以点击此按钮")
+                    .text(t.only_initiator_can_click())
                     .await;
                 return Ok(());
             }
@@ -169,6 +182,7 @@ pub async fn callback_handler(
             match process_zw_for_user(
                 &pool,
                 database_kind,
+                locale,
                 user_id,
                 username,
                 first_name,
@@ -250,12 +264,10 @@ pub async fn callback_handler(
                         &format!("process_zw_for_user failed: {}", e),
                     );
                     if let Some(msg) = &q.message {
-                        let _ = bot
-                            .send_message(msg.chat().id, "发生错误，请稍后重试")
-                            .await;
+                        let _ = bot.send_message(msg.chat().id, t.error_retry_later()).await;
                     } else {
                         let _ = bot
-                            .send_message(ChatId(user_id), "发生错误，请稍后重试")
+                            .send_message(ChatId(user_id), t.error_retry_later())
                             .await;
                     }
                 }
@@ -292,7 +304,7 @@ pub async fn callback_handler(
                         let _ = bot
                             .answer_callback_query(q.id)
                             .show_alert(true)
-                            .text("只有发起人可以点击此按钮")
+                            .text(t.only_initiator_can_click())
                             .await;
                         return Ok(());
                     }
@@ -340,6 +352,7 @@ pub async fn callback_handler(
                     match process_zw_help_for_user(
                         &pool,
                         database_kind,
+                        locale,
                         &crate::utils::UserIdent {
                             user_id: actual_initiator_id,
                             username: initiator_username,

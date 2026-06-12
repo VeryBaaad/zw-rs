@@ -2,6 +2,7 @@
  * Copyright (C) 2026 VeryBaaad <verybaaad@outlook.com>
  * SPDX-License-Identifier: MIT
  */
+use crate::i18n::{Locale, ZwUserInfo, get_translation};
 use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
@@ -12,15 +13,17 @@ use crate::utils::{
 use chrono::Duration;
 use log::Level;
 use std::error::Error;
-use teloxide::{prelude::*, types::ReplyParameters, utils::markdown};
+use teloxide::{prelude::*, types::ReplyParameters};
 
 pub async fn handle_zw(
     bot: Bot,
     msg: Message,
     pool: DbPool,
     database_kind: DatabaseKind,
+    locale: Locale,
     target_arg: Option<String>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let t = get_translation(locale);
     let user = msg.from.as_ref().unwrap();
     let initiator_id = user.id.0 as i64;
     let initiator_username = user.username.as_deref();
@@ -49,7 +52,7 @@ pub async fn handle_zw(
     let cd_duration = Duration::minutes(30);
 
     if target_arg.is_none() {
-        return handle_zw_self(bot, msg, pool, database_kind).await;
+        return handle_zw_self(bot, msg, pool, database_kind, locale).await;
     }
 
     let target_key = target_arg.unwrap();
@@ -57,7 +60,7 @@ pub async fn handle_zw(
 
     let target_record = find_user_by_id_or_username(&pool, database_kind, &target_key).await?;
     if target_record.is_none() {
-        let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
+        let text = t.user_not_found(&target_key);
         let _ = bot
             .send_message(msg.chat.id, text)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -94,19 +97,17 @@ pub async fn handle_zw(
     let initiator_cd = check_cooldown(initiator_last_time_opt, now, cd_duration);
     if initiator_cd.is_in_cooldown {
         any_in_cd = true;
-        cd_messages.push(format!(
-            "发起者 {} 仍在冷却：{}分{}秒",
-            initiator_mention, initiator_cd.mins, initiator_cd.secs
+        cd_messages.push(t.zw_cd_initiator(
+            &initiator_mention,
+            initiator_cd.mins,
+            initiator_cd.secs,
         ));
     }
 
     let target_cd = check_cooldown(target_last_time_opt, now, cd_duration);
     if target_cd.is_in_cooldown {
         any_in_cd = true;
-        cd_messages.push(format!(
-            "另一位 {} 仍在冷却：{}分{}秒",
-            target_mention, target_cd.mins, target_cd.secs
-        ));
+        cd_messages.push(t.zw_cd_partner(&target_mention, target_cd.mins, target_cd.secs));
     }
 
     if any_in_cd {
@@ -116,23 +117,18 @@ pub async fn handle_zw(
         let target_rank = get_rank(&pool, target_user_id, database_kind)
             .await
             .unwrap_or(0);
-        let text = format!(
-            "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
-发起者：{}\n\
-次数：{}次\n\
-排行榜位置：{}\n\n\
-另一位：{}\n\
-次数：{}次\n\
-排行榜位置：{}\n\n\
-{}",
-            initiator_mention,
-            initiator_mention,
-            markdown::escape(initiator_count.to_string().as_str()),
-            initiator_rank,
-            target_mention,
-            markdown::escape(target_count.to_string().as_str()),
-            target_rank,
-            cd_messages.join("\n")
+        let text = t.zw_pair_cooldown(
+            &ZwUserInfo {
+                mention: &initiator_mention,
+                count: initiator_count,
+                rank: initiator_rank,
+            },
+            &ZwUserInfo {
+                mention: &target_mention,
+                count: target_count,
+                rank: target_rank,
+            },
+            &cd_messages.join("\n"),
         );
         let _ = bot
             .send_message(msg.chat.id, text)
@@ -177,20 +173,17 @@ pub async fn handle_zw(
     let initiator_rank = get_rank(&pool, initiator_id, database_kind).await?;
     let target_rank = get_rank(&pool, target_user_id, database_kind).await?;
 
-    let text = format!(
-        "已进行双人运动！\n\n\
-{} 带上 {} 进行了性行为！\n\n\
-发起者：{}次\n\
-另一位：{}次\n\n\
-您在自慰排行榜上的位置：{}\n\
-另一位在自慰排行榜上的位置：{}\n\
-下次可进行自慰的时间：30分0秒",
-        initiator_mention,
-        target_mention,
-        markdown::escape(new_initiator_count.to_string().as_str()),
-        markdown::escape(new_target_count.to_string().as_str()),
-        initiator_rank,
-        target_rank
+    let text = t.zw_pair_success(
+        &ZwUserInfo {
+            mention: &initiator_mention,
+            count: new_initiator_count,
+            rank: initiator_rank,
+        },
+        &ZwUserInfo {
+            mention: &target_mention,
+            count: new_target_count,
+            rank: target_rank,
+        },
     );
 
     bot.send_message(msg.chat.id, &text)
@@ -211,7 +204,9 @@ pub async fn handle_zw_self(
     msg: Message,
     pool: DbPool,
     database_kind: DatabaseKind,
+    locale: Locale,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let t = get_translation(locale);
     log(Level::Debug, "handle_zw", "Handling zw command");
     let user = msg.from.as_ref().unwrap();
     let user_id = user.id.0 as i64;
@@ -262,12 +257,12 @@ pub async fn handle_zw_self(
             &format!("User {} still in cooldown", user_id),
         );
         let rank = get_rank(&pool, user_id, database_kind).await?;
-        let text = format!(
-            "{}，杂鱼杂鱼，已经达到顶峰了呢\\~\n\n\
-您在自慰排行榜上的位置：{}\n\
-总次数：{}次\n\
-下次可进行自慰的时间：{}分{}秒",
-            user_mention, rank, current_count, cd_status.mins, cd_status.secs
+        let text = t.zw_self_cooldown(
+            &user_mention,
+            rank,
+            current_count,
+            cd_status.mins,
+            cd_status.secs,
         );
         if let Err(e) = bot
             .send_message(msg.chat.id, text)
@@ -312,13 +307,7 @@ pub async fn handle_zw_self(
     .await?;
 
     let rank = get_rank(&pool, user_id, database_kind).await?;
-    let text = format!(
-        "已开始自慰！\n\n\
-您在自慰排行榜上的位置：{}\n\
-总次数：{}次\n\
-下次可进行自慰的时间：30分0秒",
-        rank, new_count
-    );
+    let text = t.zw_self_success(rank, new_count);
     if let Err(e) = bot
         .send_message(msg.chat.id, text)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -345,11 +334,13 @@ pub async fn handle_zw_self(
 pub async fn process_zw_for_user(
     pool: &DbPool,
     database_kind: DatabaseKind,
+    locale: Locale,
     user_id: i64,
     username: Option<&str>,
     first_name: Option<&str>,
     last_name: Option<&str>,
 ) -> Result<(String, i64), Box<dyn Error + Send + Sync>> {
+    let t = get_translation(locale);
     let user_mention = format_user_mention(user_id, first_name, last_name, username);
     log(
         Level::Debug,
@@ -366,12 +357,12 @@ pub async fn process_zw_for_user(
     let cd_status = check_cooldown(last_time_opt, now, cd_duration);
     if cd_status.is_in_cooldown {
         let rank = get_rank(pool, user_id, database_kind).await.unwrap_or(0);
-        let text = format!(
-            "{}，杂鱼杂鱼，已经达到顶峰了呢\\~\n\n\
-您在自慰排行榜上的位置：{}\n\
-总次数：{}次\n\
-下次可进行自慰的时间：{}分{}秒",
-            user_mention, rank, current_count, cd_status.mins, cd_status.secs
+        let text = t.zw_self_cooldown(
+            &user_mention,
+            rank,
+            current_count,
+            cd_status.mins,
+            cd_status.secs,
         );
         return Ok((text, current_count));
     }
@@ -393,22 +384,18 @@ pub async fn process_zw_for_user(
     .await?;
 
     let rank = get_rank(pool, user_id, database_kind).await?;
-    let text = format!(
-        "已开始自慰！\n\n\
-您在自慰排行榜上的位置：{}\n\
-总次数：{}次\n\
-下次可进行自慰的时间：30分0秒",
-        rank, new_count
-    );
+    let text = t.zw_self_success(rank, new_count);
     Ok((text, new_count))
 }
 
 pub async fn process_zw_help_for_user(
     pool: &DbPool,
     database_kind: DatabaseKind,
+    locale: Locale,
     initiator: &UserIdent<'_>,
     target: &UserIdent<'_>,
 ) -> Result<(String, bool), Box<dyn Error + Send + Sync>> {
+    let t = get_translation(locale);
     let initiator_mention = format_user_mention(
         initiator.user_id,
         initiator.first_name,
@@ -445,20 +432,14 @@ pub async fn process_zw_help_for_user(
         let cd_status = check_cooldown(Some(lt), now, cd_duration);
         if cd_status.is_in_cooldown {
             any_in_cd = true;
-            cd_messages.push(format!(
-                "发起者 {} 仍在冷却：{}分{}秒",
-                initiator_mention, cd_status.mins, cd_status.secs
-            ));
+            cd_messages.push(t.zw_cd_initiator(&initiator_mention, cd_status.mins, cd_status.secs));
         }
     }
     if let Some(lt) = target_last_time_opt {
         let cd_status = check_cooldown(Some(lt), now, cd_duration);
         if cd_status.is_in_cooldown {
             any_in_cd = true;
-            cd_messages.push(format!(
-                "另一位 {} 仍在冷却：{}分{}秒",
-                target_mention, cd_status.mins, cd_status.secs
-            ));
+            cd_messages.push(t.zw_cd_partner(&target_mention, cd_status.mins, cd_status.secs));
         }
     }
 
@@ -470,23 +451,18 @@ pub async fn process_zw_help_for_user(
             .await
             .unwrap_or(0);
         return Ok((
-            format!(
-                "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
-发起者：{}\n\
-次数：{}次\n\
-排行榜位置：{}\n\n\
-另一位：{}\n\
-次数：{}次\n\
-排行榜位置：{}\n\n\
-{}",
-                initiator_mention,
-                initiator_mention,
-                markdown::escape(initiator_count.to_string().as_str()),
-                initiator_rank,
-                target_mention,
-                markdown::escape(target_count.to_string().as_str()),
-                target_rank,
-                cd_messages.join("\n")
+            t.zw_pair_cooldown(
+                &ZwUserInfo {
+                    mention: &initiator_mention,
+                    count: initiator_count,
+                    rank: initiator_rank,
+                },
+                &ZwUserInfo {
+                    mention: &target_mention,
+                    count: target_count,
+                    rank: target_rank,
+                },
+                &cd_messages.join("\n"),
             ),
             false,
         ));
@@ -505,20 +481,17 @@ pub async fn process_zw_help_for_user(
     let initiator_rank = get_rank(pool, initiator.user_id, database_kind).await?;
     let target_rank = get_rank(pool, target.user_id, database_kind).await?;
 
-    let text = format!(
-        "已进行双人运动！\n\n\
-{} 带上 {} 进行了性行为！\n\n\
-发起者：{}次\n\
-另一位：{}次\n\n\
-您在自慰排行榜上的位置：{}\n\
-另一位在自慰排行榜上的位置：{}\n\
-下次可进行自慰的时间：30分0秒",
-        initiator_mention,
-        target_mention,
-        markdown::escape(new_initiator_count.to_string().as_str()),
-        markdown::escape(new_target_count.to_string().as_str()),
-        initiator_rank,
-        target_rank
+    let text = t.zw_pair_success(
+        &ZwUserInfo {
+            mention: &initiator_mention,
+            count: new_initiator_count,
+            rank: initiator_rank,
+        },
+        &ZwUserInfo {
+            mention: &target_mention,
+            count: new_target_count,
+            rank: target_rank,
+        },
     );
 
     Ok((text, true))
