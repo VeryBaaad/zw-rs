@@ -6,8 +6,9 @@ use crate::utils::DbPool;
 use crate::utils::config::DatabaseKind;
 use crate::utils::logger::log;
 use crate::utils::{
-    UserIdent, check_cooldown, find_user_by_id_or_username, format_user_mention, get_rank,
-    get_user_count_and_last_time, sync_user_info, upsert_user,
+    UserIdent, check_cooldown, find_user_by_id_or_username, format_user_mention,
+    get_probably_guarantee, get_rank, get_user_count_and_last_time, set_probably_guarantee,
+    sync_user_info, upsert_user,
 };
 use chrono::Duration;
 use log::Level;
@@ -144,16 +145,38 @@ pub async fn handle_zw(
         return Ok(());
     }
 
-    let probable_event: u64 = rng().random_range(1..=100);
-    let (probable_initiator_count, probable_target_count, probable_newer_time) =
-        match probable_event {
-            1..=10 => (initiator_count + 50, target_count + 25, now + 1800),
-            11..=100 => (initiator_count + 1, target_count + 1, now),
-            _ => (initiator_count, target_count, now),
-        };
-    let new_initiator_count = probable_initiator_count;
-    let new_target_count = probable_target_count;
-    let newer_time = probable_newer_time;
+    let initiator_probably_guarantee =
+        get_probably_guarantee(&pool, database_kind, initiator_id).await?;
+    let target_probably_guarantee =
+        get_probably_guarantee(&pool, database_kind, target_user_id).await?;
+    let average_probably_guarantee = (initiator_probably_guarantee + target_probably_guarantee) / 2;
+    let probable_event: i64 = rng().random_range(1..=100);
+    let (new_initiator_count, new_target_count, newer_time) = match probable_event {
+        r if r <= (10 + average_probably_guarantee) => {
+            set_probably_guarantee(&pool, database_kind, initiator_id, 0).await?;
+            set_probably_guarantee(&pool, database_kind, target_user_id, 0).await?;
+            (initiator_count + 50, target_count + 25, now + 1800)
+        }
+        _ => {
+            let new_initiator_probably_guarantee = (initiator_probably_guarantee + 5).min(100);
+            let new_target_probably_guarantee = (target_probably_guarantee + 5).min(100);
+            set_probably_guarantee(
+                &pool,
+                database_kind,
+                initiator_id,
+                new_initiator_probably_guarantee,
+            )
+            .await?;
+            set_probably_guarantee(
+                &pool,
+                database_kind,
+                target_user_id,
+                new_target_probably_guarantee,
+            )
+            .await?;
+            (initiator_count + 1, target_count + 1, now)
+        }
+    };
 
     let mut tx = pool.begin().await?;
     upsert_user(
@@ -188,7 +211,7 @@ pub async fn handle_zw(
     let target_rank = get_rank(&pool, target_user_id, database_kind).await?;
 
     let text = match probable_event {
-        1..=10 => {
+        r if r <= (10 + average_probably_guarantee) => {
             format!(
                 "已进行调教！\n\n\
 {} 陪 {} van游戏！\n\n\
@@ -205,7 +228,7 @@ pub async fn handle_zw(
                 target_rank
             )
         }
-        11..=100 => {
+        _ => {
             format!(
                 "已进行双人运动！\n\n\
 {} 带上 {} 进行了性行为！\n\n\
@@ -222,7 +245,6 @@ pub async fn handle_zw(
                 target_rank
             )
         }
-        _ => "Unknown Error".to_string(),
     };
 
     bot.send_message(msg.chat.id, &text)
@@ -323,14 +345,19 @@ pub async fn handle_zw_self(
     );
 
     // Update count and last_time
-    let probable_event: u64 = rng().random_range(1..=100);
-    let (probable_new_count, probable_newer_time) = match probable_event {
-        1..=10 => (current_count + 25, now + 1800),
-        11..=100 => (current_count + 1, now),
-        _ => (current_count, now),
+    let current_probably_guarantee = get_probably_guarantee(&pool, database_kind, user_id).await?;
+    let probable_event: i64 = rng().random_range(1..=100);
+    let (new_count, newer_time) = match probable_event {
+        r if r <= (10 + current_probably_guarantee) => {
+            set_probably_guarantee(&pool, database_kind, user_id, 0).await?;
+            (current_count + 25, now + 1800)
+        }
+        _ => {
+            let new_probably_guarantee = (current_probably_guarantee + 5).min(100);
+            set_probably_guarantee(&pool, database_kind, user_id, new_probably_guarantee).await?;
+            (current_count + 1, now)
+        }
     };
-    let new_count = probable_new_count;
-    let newer_time = probable_newer_time;
     log(
         Level::Info,
         "handle_zw",
@@ -352,7 +379,7 @@ pub async fn handle_zw_self(
 
     let rank = get_rank(&pool, user_id, database_kind).await?;
     let text = match probable_event {
-        1..=10 => {
+        r if r <= (10 + current_probably_guarantee) => {
             format!(
                 "到顶了呢♡\n\n\
 您在自慰排行榜上的位置：{}\n\
@@ -361,7 +388,7 @@ pub async fn handle_zw_self(
                 rank, new_count
             )
         }
-        11..=100 => {
+        _ => {
             format!(
                 "已开始自慰！\n\n\
 您在自慰排行榜上的位置：{}\n\
@@ -370,7 +397,6 @@ pub async fn handle_zw_self(
                 rank, new_count
             )
         }
-        _ => "Unknown Error".to_string(),
     };
     if let Err(e) = bot
         .send_message(msg.chat.id, text)
@@ -430,14 +456,19 @@ pub async fn process_zw_for_user(
     }
 
     // Update count and last_time
-    let probable_event: u64 = rng().random_range(1..=100);
-    let (probable_new_count, probable_newer_time) = match probable_event {
-        1..=10 => (current_count + 25, now + 1800),
-        11..=100 => (current_count + 1, now),
-        _ => (current_count, now),
+    let current_probably_guarantee = get_probably_guarantee(pool, database_kind, user_id).await?;
+    let probable_event: i64 = rng().random_range(1..=100);
+    let (new_count, newer_time) = match probable_event {
+        r if r <= (10 + current_probably_guarantee) => {
+            set_probably_guarantee(pool, database_kind, user_id, 0).await?;
+            (current_count + 25, now + 1800)
+        }
+        _ => {
+            let new_probably_guarantee = (current_probably_guarantee + 5).min(100);
+            set_probably_guarantee(pool, database_kind, user_id, new_probably_guarantee).await?;
+            (current_count + 1, now)
+        }
     };
-    let new_count = probable_new_count;
-    let newer_time = probable_newer_time;
     upsert_user(
         pool,
         database_kind,
@@ -454,7 +485,7 @@ pub async fn process_zw_for_user(
 
     let rank = get_rank(pool, user_id, database_kind).await?;
     let text = match probable_event {
-        1..=10 => {
+        r if r <= (10 + current_probably_guarantee) => {
             format!(
                 "到顶了呢♡\n\n\
 您在自慰排行榜上的位置：{}\n\
@@ -463,7 +494,7 @@ pub async fn process_zw_for_user(
                 rank, new_count
             )
         }
-        11..=100 => {
+        _ => {
             format!(
                 "已开始自慰！\n\n\
 您在自慰排行榜上的位置：{}\n\
@@ -472,7 +503,6 @@ pub async fn process_zw_for_user(
                 rank, new_count
             )
         }
-        _ => "Unknown Error".to_string(),
     };
     Ok((text, new_count))
 }
@@ -567,16 +597,38 @@ pub async fn process_zw_help_for_user(
     }
 
     // Update both users
-    let probable_event: u64 = rng().random_range(1..=100);
-    let (probable_initiator_count, probable_target_count, probable_newer_time) =
-        match probable_event {
-            1..=10 => (initiator_count + 50, target_count + 25, now + 1800),
-            11..=100 => (initiator_count + 1, target_count + 1, now),
-            _ => (initiator_count, target_count, now),
-        };
-    let new_initiator_count = probable_initiator_count;
-    let new_target_count = probable_target_count;
-    let newer_time = probable_newer_time;
+    let initiator_probably_guarantee =
+        get_probably_guarantee(pool, database_kind, initiator.user_id).await?;
+    let target_probably_guarantee =
+        get_probably_guarantee(pool, database_kind, target.user_id).await?;
+    let average_probably_guarantee = (initiator_probably_guarantee + target_probably_guarantee) / 2;
+    let probable_event: i64 = rng().random_range(1..=100);
+    let (new_initiator_count, new_target_count, newer_time) = match probable_event {
+        r if r <= (10 + average_probably_guarantee) => {
+            set_probably_guarantee(pool, database_kind, initiator.user_id, 0).await?;
+            set_probably_guarantee(pool, database_kind, target.user_id, 0).await?;
+            (initiator_count + 50, target_count + 25, now + 1800)
+        }
+        _ => {
+            let new_initiator_probably_guarantee = (initiator_probably_guarantee + 5).min(100);
+            let new_target_probably_guarantee = (target_probably_guarantee + 5).min(100);
+            set_probably_guarantee(
+                pool,
+                database_kind,
+                initiator.user_id,
+                new_initiator_probably_guarantee,
+            )
+            .await?;
+            set_probably_guarantee(
+                pool,
+                database_kind,
+                target.user_id,
+                new_target_probably_guarantee,
+            )
+            .await?;
+            (initiator_count + 1, target_count + 1, now)
+        }
+    };
 
     let mut tx = pool.begin().await?;
     upsert_user(
@@ -602,7 +654,7 @@ pub async fn process_zw_help_for_user(
     let target_rank = get_rank(pool, target.user_id, database_kind).await?;
 
     let text = match probable_event {
-        1..=10 => {
+        r if r <= (10 + average_probably_guarantee) => {
             format!(
                 "已进行调教！\n\n\
 {} 陪 {} van游戏！\n\n\
@@ -619,7 +671,7 @@ pub async fn process_zw_help_for_user(
                 target_rank
             )
         }
-        11..=100 => {
+        _ => {
             format!(
                 "已进行双人运动！\n\n\
 {} 带上 {} 进行了性行为！\n\n\
@@ -636,7 +688,6 @@ pub async fn process_zw_help_for_user(
                 target_rank
             )
         }
-        _ => "Unknown Error".to_string(),
     };
 
     Ok((text, true))

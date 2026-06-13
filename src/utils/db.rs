@@ -11,7 +11,7 @@ use sqlx::{Any, Row};
 use std::error::Error;
 use teloxide::{prelude::*, utils::markdown};
 
-const CURRENT_DB_VERSION: i32 = 4;
+const CURRENT_DB_VERSION: i32 = 5;
 
 /// Compact user identity used to pass user fields to DB/service functions.
 pub struct UserIdent<'a> {
@@ -46,7 +46,8 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
                 count INTEGER NOT NULL DEFAULT 0,
                 last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT 0,
-                is_banned INTEGER NOT NULL DEFAULT 0
+                is_banned INTEGER NOT NULL DEFAULT 0,
+                probably_guarantee INTEGER NOT NULL DEFAULT 0
             )"
         }
         DatabaseKind::Postgres => {
@@ -58,7 +59,8 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
                 count BIGINT NOT NULL DEFAULT 0,
                 last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT FALSE,
-                is_banned INTEGER NOT NULL DEFAULT 0
+                is_banned INTEGER NOT NULL DEFAULT 0,
+                probably_guarantee INTEGER NOT NULL DEFAULT 0
             )"
         }
         DatabaseKind::MySql | DatabaseKind::MariaDb => {
@@ -70,7 +72,8 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
                 count BIGINT NOT NULL DEFAULT 0,
                 last_time BIGINT NOT NULL DEFAULT 0,
                 is_admin BOOLEAN NOT NULL DEFAULT FALSE,
-                is_banned INTEGER NOT NULL DEFAULT 0
+                is_banned INTEGER NOT NULL DEFAULT 0,
+                probably_guarantee INTEGER NOT NULL DEFAULT 0
             )"
         }
     }
@@ -116,6 +119,10 @@ fn add_first_name_sql(_kind: DatabaseKind) -> &'static str {
 
 fn add_last_name_sql(_kind: DatabaseKind) -> &'static str {
     "ALTER TABLE users ADD COLUMN last_name TEXT"
+}
+
+fn add_probably_guarantee_sql(_kind: DatabaseKind) -> &'static str {
+    "ALTER TABLE users ADD COLUMN probably_guarantee INTEGER NOT NULL DEFAULT 0"
 }
 
 fn upsert_user_sql(kind: DatabaseKind) -> &'static str {
@@ -365,6 +372,24 @@ async fn upgrade_database(pool: &DbPool, from_version: i32, database_kind: Datab
                 .expect("Failed to add last_name column");
         }
         v = 4;
+    }
+
+    if v == 4 {
+        log(
+            Level::Info,
+            "init_database",
+            "Running migration v4 -> v5: adding probably_guarantee column",
+        );
+        if !column_exists(pool, database_kind, "probably_guarantee")
+            .await
+            .unwrap_or(true)
+        {
+            sqlx::query(add_probably_guarantee_sql(database_kind))
+                .execute(pool)
+                .await
+                .expect("Failed to add probably_guarantee column");
+        }
+        v = 5;
     }
 
     sqlx::query(update_db_version_sql(database_kind))
@@ -945,4 +970,59 @@ pub fn check_cooldown(last_time: Option<i64>, now: i64, duration: Duration) -> C
         mins: 0,
         secs: 0,
     }
+}
+
+pub async fn get_probably_guarantee(
+    pool: &DbPool,
+    database_kind: DatabaseKind,
+    user_id: i64,
+) -> Result<i64, Box<dyn Error + Send + Sync>> {
+    log(
+        Level::Debug,
+        "get_probably_guarantee",
+        &format!("Fetching probably_guarantee for user {}", user_id),
+    );
+    let row = sqlx::query(match database_kind {
+        DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "SELECT probably_guarantee FROM users WHERE user_id = ?"
+        }
+        DatabaseKind::Postgres => "SELECT probably_guarantee FROM users WHERE user_id = $1",
+    })
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(row) = row {
+        let count: i64 = row.try_get("probably_guarantee")?;
+        Ok(count)
+    } else {
+        Ok(0)
+    }
+}
+
+pub async fn set_probably_guarantee(
+    pool: &DbPool,
+    database_kind: DatabaseKind,
+    user_id: i64,
+    probably_guarantee: i64,
+) -> Result<(), sqlx::Error> {
+    log(
+        Level::Info,
+        "set_probably_guarantee",
+        &format!(
+            "Setting user {} probably_guarantee to {}",
+            user_id, probably_guarantee
+        ),
+    );
+    sqlx::query(match database_kind {
+        DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "UPDATE users SET probably_guarantee = ? WHERE user_id = ?"
+        }
+        DatabaseKind::Postgres => "UPDATE users SET probably_guarantee = $1 WHERE user_id = $2",
+    })
+    .bind(probably_guarantee)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
