@@ -1,6 +1,6 @@
 [package]
 name = "zw-rs"
-version = "2.1.1"
+version = "2.2.0"
 authors = ["VeryBaaad <verybaaad@outlook.com>"]
 license = "MIT"
 edition = "2024"
