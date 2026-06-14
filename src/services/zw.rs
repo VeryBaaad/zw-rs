@@ -158,8 +158,8 @@ pub async fn handle_zw(
             (initiator_count + 50, target_count + 25, now + 1800)
         }
         _ => {
-            let new_initiator_probably_guarantee = (initiator_probably_guarantee + 5).min(100);
-            let new_target_probably_guarantee = (target_probably_guarantee + 5).min(100);
+            let new_initiator_probably_guarantee = (initiator_probably_guarantee + 1).min(90);
+            let new_target_probably_guarantee = (target_probably_guarantee + 1).min(90);
             set_probably_guarantee(
                 &pool,
                 database_kind,
@@ -353,7 +353,7 @@ pub async fn handle_zw_self(
             (current_count + 25, now + 1800)
         }
         _ => {
-            let new_probably_guarantee = (current_probably_guarantee + 5).min(100);
+            let new_probably_guarantee = (current_probably_guarantee + 1).min(90);
             set_probably_guarantee(&pool, database_kind, user_id, new_probably_guarantee).await?;
             (current_count + 1, now)
         }
@@ -464,7 +464,7 @@ pub async fn process_zw_for_user(
             (current_count + 25, now + 1800)
         }
         _ => {
-            let new_probably_guarantee = (current_probably_guarantee + 5).min(100);
+            let new_probably_guarantee = (current_probably_guarantee + 1).min(90);
             set_probably_guarantee(pool, database_kind, user_id, new_probably_guarantee).await?;
             (current_count + 1, now)
         }
@@ -610,8 +610,8 @@ pub async fn process_zw_help_for_user(
             (initiator_count + 50, target_count + 25, now + 1800)
         }
         _ => {
-            let new_initiator_probably_guarantee = (initiator_probably_guarantee + 5).min(100);
-            let new_target_probably_guarantee = (target_probably_guarantee + 5).min(100);
+            let new_initiator_probably_guarantee = (initiator_probably_guarantee + 1).min(90);
+            let new_target_probably_guarantee = (target_probably_guarantee + 1).min(90);
             set_probably_guarantee(
                 pool,
                 database_kind,
