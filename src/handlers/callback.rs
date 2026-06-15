@@ -176,7 +176,7 @@ pub async fn callback_handler(
             )
             .await
             {
-                Ok((text, _)) => {
+                Ok((text, _, zw_kb)) => {
                     if let Some(msg) = &q.message {
                         log(
                             Level::Debug,
@@ -188,6 +188,7 @@ pub async fn callback_handler(
                         if let Err(e) = bot
                             .edit_message_text(chat_id, message_id, text.clone())
                             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                            .reply_markup(zw_kb.clone().unwrap_or_default())
                             .await
                         {
                             log(
@@ -198,6 +199,7 @@ pub async fn callback_handler(
                             if let Err(e2) = bot
                                 .send_message(chat_id, text.clone())
                                 .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                .reply_markup(zw_kb.clone().unwrap_or_default())
                                 .await
                             {
                                 log(
@@ -216,6 +218,7 @@ pub async fn callback_handler(
                         if let Err(e) = bot
                             .edit_message_text_inline(inline_id, text.clone())
                             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                            .reply_markup(zw_kb.clone().unwrap_or_default())
                             .await
                         {
                             log(
@@ -233,6 +236,7 @@ pub async fn callback_handler(
                         if let Err(e) = bot
                             .send_message(ChatId(user_id), text.clone())
                             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                            .reply_markup(zw_kb.clone().unwrap_or_default())
                             .await
                         {
                             log(
@@ -355,7 +359,7 @@ pub async fn callback_handler(
                     )
                     .await
                     {
-                        Ok((text, success)) => {
+                        Ok((text, success, zw_kb)) => {
                             if let Some(msg) = &q.message {
                                 log(
                                     Level::Debug,
@@ -367,6 +371,7 @@ pub async fn callback_handler(
                                 if let Err(e) = bot
                                     .edit_message_text(chat_id, message_id, text.clone())
                                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                    .reply_markup(zw_kb.clone().unwrap_or_default())
                                     .await
                                 {
                                     log(
@@ -377,6 +382,7 @@ pub async fn callback_handler(
                                     if let Err(e2) = bot
                                         .send_message(chat_id, text.clone())
                                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                        .reply_markup(zw_kb.clone().unwrap_or_default())
                                         .await
                                     {
                                         log(
@@ -395,6 +401,7 @@ pub async fn callback_handler(
                                 if let Err(e) = bot
                                     .edit_message_text_inline(inline_id, text.clone())
                                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                    .reply_markup(zw_kb.clone().unwrap_or_default())
                                     .await
                                 {
                                     log(
@@ -413,6 +420,7 @@ pub async fn callback_handler(
                             if success {
                                 bot.send_message(UserId(target_id as u64), text)
                                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                    .reply_markup(zw_kb.clone().unwrap_or_default())
                                     .await?;
                             }
                         }
