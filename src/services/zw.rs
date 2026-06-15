@@ -14,8 +14,8 @@ use chrono::Duration;
 use log::Level;
 use rand::RngExt;
 use rand::rng;
-use teloxide::types::InlineKeyboardMarkup;
 use std::error::Error;
+use teloxide::types::InlineKeyboardMarkup;
 use teloxide::{prelude::*, types::ReplyParameters, utils::markdown};
 
 pub async fn handle_zw(
