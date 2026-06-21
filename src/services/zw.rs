@@ -25,7 +25,9 @@ pub async fn handle_zw(
     database_kind: DatabaseKind,
     target_arg: Option<String>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let user = msg.from.as_ref().unwrap();
+    let Some(user) = msg.from.as_ref() else {
+        return Err("Message has no sender".into());
+    };
     let initiator_id = user.id.0 as i64;
     let initiator_username = user.username.as_deref();
     let initiator_first_name = Some(user.first_name.as_str());
@@ -52,30 +54,28 @@ pub async fn handle_zw(
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
-    if target_arg.is_none() {
+    let Some(target_key) = target_arg else {
         return handle_zw_self(bot, msg, pool, database_kind).await;
-    }
-
-    let target_key = target_arg.unwrap();
+    };
     let target_key = target_key.trim().trim_start_matches('@').to_string();
 
     let target_record = find_user_by_id_or_username(&pool, database_kind, &target_key).await?;
-    if target_record.is_none() {
-        let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
-        let _ = bot
-            .send_message(msg.chat.id, text)
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await;
-        return Ok(());
-    }
-    let (
+    let Some((
         target_count,
         target_last_time_opt,
         target_username,
         target_first_name,
         target_last_name,
         target_user_id,
-    ) = target_record.unwrap();
+    )) = target_record
+    else {
+        let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
+        let _ = bot
+            .send_message(msg.chat.id, text)
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await;
+        return Ok(());
+    };
     let initiator_mention = format_user_mention(
         initiator_id,
         initiator_first_name,
@@ -276,7 +276,9 @@ pub async fn handle_zw_self(
     database_kind: DatabaseKind,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(Level::Debug, "handle_zw", "Handling zw command");
-    let user = msg.from.as_ref().unwrap();
+    let Some(user) = msg.from.as_ref() else {
+        return Err("Message has no sender".into());
+    };
     let user_id = user.id.0 as i64;
     let username = user.username.as_deref();
     let first_name = Some(user.first_name.as_str());
