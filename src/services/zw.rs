@@ -15,6 +15,7 @@ use log::Level;
 use rand::RngExt;
 use rand::rng;
 use std::error::Error;
+use teloxide::types::InlineKeyboardMarkup;
 use teloxide::{prelude::*, types::ReplyParameters, utils::markdown};
 
 pub async fn handle_zw(
@@ -24,7 +25,9 @@ pub async fn handle_zw(
     database_kind: DatabaseKind,
     target_arg: Option<String>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let user = msg.from.as_ref().unwrap();
+    let Some(user) = msg.from.as_ref() else {
+        return Err("Message has no sender".into());
+    };
     let initiator_id = user.id.0 as i64;
     let initiator_username = user.username.as_deref();
     let initiator_first_name = Some(user.first_name.as_str());
@@ -51,30 +54,28 @@ pub async fn handle_zw(
     let now = chrono::Utc::now().timestamp();
     let cd_duration = Duration::minutes(30);
 
-    if target_arg.is_none() {
+    let Some(target_key) = target_arg else {
         return handle_zw_self(bot, msg, pool, database_kind).await;
-    }
-
-    let target_key = target_arg.unwrap();
+    };
     let target_key = target_key.trim().trim_start_matches('@').to_string();
 
     let target_record = find_user_by_id_or_username(&pool, database_kind, &target_key).await?;
-    if target_record.is_none() {
-        let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
-        let _ = bot
-            .send_message(msg.chat.id, text)
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await;
-        return Ok(());
-    }
-    let (
+    let Some((
         target_count,
         target_last_time_opt,
         target_username,
         target_first_name,
         target_last_name,
         target_user_id,
-    ) = target_record.unwrap();
+    )) = target_record
+    else {
+        let text = format!("未找到用户 {} 的记录，无法进行帮助。", target_key);
+        let _ = bot
+            .send_message(msg.chat.id, text)
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await;
+        return Ok(());
+    };
     let initiator_mention = format_user_mention(
         initiator_id,
         initiator_first_name,
@@ -137,10 +138,18 @@ pub async fn handle_zw(
             target_rank,
             cd_messages.join("\n")
         );
+        let mut zw_kb = teloxide::types::InlineKeyboardMarkup::default();
+        zw_kb
+            .inline_keyboard
+            .push(vec![teloxide::types::InlineKeyboardButton::callback(
+                "再次尝试",
+                format!("zw_user_{}_{}", target_user_id, initiator_id),
+            )]);
         let _ = bot
             .send_message(msg.chat.id, text)
             .reply_parameters(ReplyParameters::new(msg.id))
             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+            .reply_markup(zw_kb)
             .await;
         return Ok(());
     }
@@ -267,7 +276,9 @@ pub async fn handle_zw_self(
     database_kind: DatabaseKind,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     log(Level::Debug, "handle_zw", "Handling zw command");
-    let user = msg.from.as_ref().unwrap();
+    let Some(user) = msg.from.as_ref() else {
+        return Err("Message has no sender".into());
+    };
     let user_id = user.id.0 as i64;
     let username = user.username.as_deref();
     let first_name = Some(user.first_name.as_str());
@@ -323,10 +334,18 @@ pub async fn handle_zw_self(
 下次可进行自慰的时间：{}分{}秒",
             user_mention, rank, current_count, cd_status.mins, cd_status.secs
         );
+        let mut zw_kb = teloxide::types::InlineKeyboardMarkup::default();
+        zw_kb
+            .inline_keyboard
+            .push(vec![teloxide::types::InlineKeyboardButton::callback(
+                "再次尝试",
+                format!("zw_self_{}", user_id),
+            )]);
         if let Err(e) = bot
             .send_message(msg.chat.id, text)
             .reply_parameters(ReplyParameters::new(msg.id))
             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+            .reply_markup(zw_kb)
             .await
         {
             log(
@@ -428,7 +447,7 @@ pub async fn process_zw_for_user(
     username: Option<&str>,
     first_name: Option<&str>,
     last_name: Option<&str>,
-) -> Result<(String, i64), Box<dyn Error + Send + Sync>> {
+) -> Result<(String, i64, Option<InlineKeyboardMarkup>), Box<dyn Error + Send + Sync>> {
     let user_mention = format_user_mention(user_id, first_name, last_name, username);
     log(
         Level::Debug,
@@ -452,7 +471,14 @@ pub async fn process_zw_for_user(
 下次可进行自慰的时间：{}分{}秒",
             user_mention, rank, current_count, cd_status.mins, cd_status.secs
         );
-        return Ok((text, current_count));
+        let mut zw_kb = teloxide::types::InlineKeyboardMarkup::default();
+        zw_kb
+            .inline_keyboard
+            .push(vec![teloxide::types::InlineKeyboardButton::callback(
+                "再次尝试",
+                format!("zw_self_{}", user_id),
+            )]);
+        return Ok((text, current_count, Some(zw_kb)));
     }
 
     // Update count and last_time
@@ -504,7 +530,7 @@ pub async fn process_zw_for_user(
             )
         }
     };
-    Ok((text, new_count))
+    Ok((text, new_count, None))
 }
 
 pub async fn process_zw_help_for_user(
@@ -512,7 +538,7 @@ pub async fn process_zw_help_for_user(
     database_kind: DatabaseKind,
     initiator: &UserIdent<'_>,
     target: &UserIdent<'_>,
-) -> Result<(String, bool), Box<dyn Error + Send + Sync>> {
+) -> Result<(String, bool, Option<InlineKeyboardMarkup>), Box<dyn Error + Send + Sync>> {
     let initiator_mention = format_user_mention(
         initiator.user_id,
         initiator.first_name,
@@ -573,6 +599,13 @@ pub async fn process_zw_help_for_user(
         let target_rank = get_rank(pool, target.user_id, database_kind)
             .await
             .unwrap_or(0);
+        let mut zw_kb = teloxide::types::InlineKeyboardMarkup::default();
+        zw_kb
+            .inline_keyboard
+            .push(vec![teloxide::types::InlineKeyboardButton::callback(
+                "再次尝试",
+                format!("zw_user_{}_{}", target.user_id, initiator.user_id),
+            )]);
         return Ok((
             format!(
                 "{}，杂鱼杂鱼，他好像昏厥了呢\n\n\
@@ -593,6 +626,7 @@ pub async fn process_zw_help_for_user(
                 cd_messages.join("\n")
             ),
             false,
+            Some(zw_kb),
         ));
     }
 
@@ -690,5 +724,5 @@ pub async fn process_zw_help_for_user(
         }
     };
 
-    Ok((text, true))
+    Ok((text, true, None))
 }
