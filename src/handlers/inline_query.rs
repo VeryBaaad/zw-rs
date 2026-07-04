@@ -251,6 +251,7 @@ pub async fn inline_query_handler(
     if !query.is_empty()
         && let Ok(user_id) = query.parse::<i64>()
         && user_exists(&pool, database_kind, user_id).await?
+        && user_id != initiator_id
     {
         let initiator_id = q.from.id.0 as i64;
         let mut kb = teloxide::types::InlineKeyboardMarkup::default();
