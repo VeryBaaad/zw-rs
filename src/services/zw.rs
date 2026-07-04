@@ -77,6 +77,11 @@ pub async fn handle_zw(
         return Ok(());
     };
     if target_user_id == initiator_id {
+        let text = "405 Method Not Allowed";
+        let _ = bot
+            .send_message(msg.chat.id, text)
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await;
         return Ok(());
     }
     let initiator_mention = format_user_mention(
