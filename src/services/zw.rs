@@ -76,6 +76,14 @@ pub async fn handle_zw(
             .await;
         return Ok(());
     };
+    if target_user_id == initiator_id {
+        let text = "405 Method Not Allowed";
+        let _ = bot
+            .send_message(msg.chat.id, text)
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await;
+        return Ok(());
+    }
     let initiator_mention = format_user_mention(
         initiator_id,
         initiator_first_name,
@@ -551,6 +559,9 @@ pub async fn process_zw_help_for_user(
         target.last_name,
         target.username,
     );
+    if target.user_id == initiator.user_id {
+        return Ok(("405 Method Not Allowed".to_string(), false, None));
+    }
     log(
         Level::Debug,
         "process_zw_help_for_user",

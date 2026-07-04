@@ -106,7 +106,7 @@ pub async fn commands_handler(
     match cmd {
         Command::Zw(arg) => {
             let arg = arg.trim();
-            if arg.is_empty() {
+            if arg.is_empty() || (arg.parse::<i32>() == Ok(msg.id.0)) {
                 log(
                     Level::Debug,
                     "commands_handler",
