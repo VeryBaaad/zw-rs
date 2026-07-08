@@ -75,6 +75,9 @@ pub async fn commands_handler(
     .await?
         == 2
     {
+        if rng().random() {
+            return Ok(());
+        };
         let millis: u64 = rng().random_range(3000..=10000);
         sleep(Duration::from_millis(millis)).await;
     }

@@ -275,6 +275,9 @@ pub async fn inline_query_handler(
     }
 
     if ban_status(&pool, database_kind, q.from.id.0 as i64).await? == 2 {
+        if rng().random() {
+            return Ok(());
+        };
         let millis: u64 = rng().random_range(3000..=10000);
         sleep(Duration::from_millis(millis)).await;
     }
