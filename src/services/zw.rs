@@ -172,7 +172,7 @@ pub async fn handle_zw(
         r if r <= (10 + average_probably_guarantee) => {
             set_probably_guarantee(&pool, database_kind, initiator_id, 0).await?;
             set_probably_guarantee(&pool, database_kind, target_user_id, 0).await?;
-            (initiator_count + 50, target_count + 25, now + 1800)
+            (initiator_count + 50, target_count + 25, now + 600)
         }
         _ => {
             let new_initiator_probably_guarantee = (initiator_probably_guarantee + 1).min(90);
@@ -236,7 +236,7 @@ pub async fn handle_zw(
 另一位：{}次\n\n\
 您在自慰排行榜上的位置：{}\n\
 另一位在自慰排行榜上的位置：{}\n\
-下次可进行自慰的时间：60分0秒",
+下次可进行自慰的时间：40分0秒",
                 initiator_mention,
                 target_mention,
                 markdown::escape(new_initiator_count.to_string().as_str()),
@@ -377,7 +377,7 @@ pub async fn handle_zw_self(
     let (new_count, newer_time) = match probable_event {
         r if r <= (10 + current_probably_guarantee) => {
             set_probably_guarantee(&pool, database_kind, user_id, 0).await?;
-            (current_count + 25, now + 1800)
+            (current_count + 25, now + 600)
         }
         _ => {
             let new_probably_guarantee = (current_probably_guarantee + 1).min(90);
@@ -495,7 +495,7 @@ pub async fn process_zw_for_user(
     let (new_count, newer_time) = match probable_event {
         r if r <= (10 + current_probably_guarantee) => {
             set_probably_guarantee(pool, database_kind, user_id, 0).await?;
-            (current_count + 25, now + 1800)
+            (current_count + 25, now + 600)
         }
         _ => {
             let new_probably_guarantee = (current_probably_guarantee + 1).min(90);
@@ -652,7 +652,7 @@ pub async fn process_zw_help_for_user(
         r if r <= (10 + average_probably_guarantee) => {
             set_probably_guarantee(pool, database_kind, initiator.user_id, 0).await?;
             set_probably_guarantee(pool, database_kind, target.user_id, 0).await?;
-            (initiator_count + 50, target_count + 25, now + 1800)
+            (initiator_count + 50, target_count + 25, now + 600)
         }
         _ => {
             let new_initiator_probably_guarantee = (initiator_probably_guarantee + 1).min(90);
@@ -707,7 +707,7 @@ pub async fn process_zw_help_for_user(
 另一位：{}次\n\n\
 您在自慰排行榜上的位置：{}\n\
 另一位在自慰排行榜上的位置：{}\n\
-下次可进行自慰的时间：60分0秒",
+下次可进行自慰的时间：40分0秒",
                 initiator_mention,
                 target_mention,
                 markdown::escape(new_initiator_count.to_string().as_str()),
