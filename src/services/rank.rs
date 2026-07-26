@@ -34,9 +34,9 @@ pub fn build_rank_text(rows: &[DbRow], offset: i64) -> Result<String, sqlx::Erro
     let mut text = RANK_TITLE.to_string();
     for (i, row) in rows.iter().enumerate() {
         let rank = (offset + i as i64 + 1) as usize;
-        let username: Option<String> = row.try_get("username").ok();
-        let first_name: Option<String> = row.try_get("first_name").ok();
-        let last_name: Option<String> = row.try_get("last_name").ok();
+        let username: Option<String> = row.try_get("username").unwrap_or(None);
+        let first_name: Option<String> = row.try_get("first_name").unwrap_or(None);
+        let last_name: Option<String> = row.try_get("last_name").unwrap_or(None);
         let count: i64 = row.try_get("count")?;
         let user_id: i64 = row.try_get("user_id")?;
         let mention = format_user_mention(

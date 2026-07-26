@@ -326,20 +326,29 @@ pub async fn callback_handler(
                         );
                     }
 
-                    let (target_username, target_first_name, target_last_name) = match sqlx::query(
-                        "SELECT username, first_name, last_name FROM users WHERE user_id = ?",
-                    )
-                    .bind(target_id)
-                    .fetch_optional(&pool)
-                    .await
-                    {
-                        Ok(Some(row)) => (
-                            row.try_get::<String, _>("username").ok(),
-                            row.try_get::<String, _>("first_name").ok(),
-                            row.try_get::<String, _>("last_name").ok(),
-                        ),
-                        _ => (None, None, None),
+                    let target_query = match database_kind {
+                        DatabaseKind::Sqlite | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+                            "SELECT username, first_name, last_name FROM users WHERE user_id = ?"
+                        }
+                        DatabaseKind::Postgres => {
+                            "SELECT username, first_name, last_name FROM users WHERE user_id = $1"
+                        }
                     };
+                    let (target_username, target_first_name, target_last_name) =
+                        match sqlx::query(target_query)
+                            .bind(target_id)
+                            .fetch_optional(&pool)
+                            .await
+                        {
+                            Ok(Some(row)) => (
+                                row.try_get::<Option<String>, _>("username").unwrap_or(None),
+                                row.try_get::<Option<String>, _>("first_name")
+                                    .unwrap_or(None),
+                                row.try_get::<Option<String>, _>("last_name")
+                                    .unwrap_or(None),
+                            ),
+                            _ => (None, None, None),
+                        };
 
                     match process_zw_help_for_user(
                         &pool,

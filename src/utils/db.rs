@@ -11,7 +11,13 @@ use sqlx::{Any, Row};
 use std::error::Error;
 use teloxide::{prelude::*, utils::markdown};
 
-const CURRENT_DB_VERSION: i32 = 5;
+const CURRENT_DB_VERSION: i32 = 6;
+
+/// Treat an absent and an empty username as the same thing, so a user without a Telegram
+/// username always lands in the database as NULL rather than an empty string.
+fn normalize_username(username: Option<&str>) -> Option<&str> {
+    username.filter(|s| !s.is_empty())
+}
 
 /// Compact user identity used to pass user fields to DB/service functions.
 pub struct UserIdent<'a> {
@@ -40,7 +46,7 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
         DatabaseKind::Sqlite => {
             "CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER NOT NULL UNIQUE,
-                username TEXT NOT NULL,
+                username TEXT,
                 first_name TEXT,
                 last_name TEXT,
                 count INTEGER NOT NULL DEFAULT 0,
@@ -53,7 +59,7 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
         DatabaseKind::Postgres => {
             "CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT NOT NULL UNIQUE,
-                username TEXT NOT NULL,
+                username TEXT,
                 first_name TEXT,
                 last_name TEXT,
                 count BIGINT NOT NULL DEFAULT 0,
@@ -66,7 +72,7 @@ fn users_table_ddl(kind: DatabaseKind) -> &'static str {
         DatabaseKind::MySql | DatabaseKind::MariaDb => {
             "CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT NOT NULL UNIQUE,
-                username TEXT NOT NULL,
+                username TEXT,
                 first_name TEXT,
                 last_name TEXT,
                 count BIGINT NOT NULL DEFAULT 0,
@@ -123,6 +129,23 @@ fn add_last_name_sql(_kind: DatabaseKind) -> &'static str {
 
 fn add_probably_guarantee_sql(_kind: DatabaseKind) -> &'static str {
     "ALTER TABLE users ADD COLUMN probably_guarantee INTEGER NOT NULL DEFAULT 0"
+}
+
+/// Telegram usernames are optional, so the column must accept NULL.
+/// SQLite cannot drop a NOT NULL constraint in place and is handled by a table rebuild instead.
+fn drop_username_not_null_sql(kind: DatabaseKind) -> &'static str {
+    match kind {
+        DatabaseKind::Sqlite => unreachable!("SQLite uses a table rebuild to drop NOT NULL"),
+        DatabaseKind::Postgres => "ALTER TABLE users ALTER COLUMN username DROP NOT NULL",
+        DatabaseKind::MySql | DatabaseKind::MariaDb => {
+            "ALTER TABLE users MODIFY COLUMN username TEXT NULL"
+        }
+    }
+}
+
+/// Rows written before the column became nullable stored an empty string instead of NULL.
+fn normalize_empty_username_sql() -> &'static str {
+    "UPDATE users SET username = NULL WHERE username = ''"
 }
 
 fn upsert_user_sql(kind: DatabaseKind) -> &'static str {
@@ -392,6 +415,32 @@ async fn upgrade_database(pool: &DbPool, from_version: i32, database_kind: Datab
         v = 5;
     }
 
+    if v == 5 {
+        log(
+            Level::Info,
+            "init_database",
+            "Running migration v5 -> v6: making username nullable",
+        );
+        match database_kind {
+            DatabaseKind::Sqlite => {
+                migrate_sqlite_username_nullable(pool)
+                    .await
+                    .expect("Failed to make username column nullable");
+            }
+            DatabaseKind::Postgres | DatabaseKind::MySql | DatabaseKind::MariaDb => {
+                sqlx::query(drop_username_not_null_sql(database_kind))
+                    .execute(pool)
+                    .await
+                    .expect("Failed to drop NOT NULL on username column");
+                sqlx::query(normalize_empty_username_sql())
+                    .execute(pool)
+                    .await
+                    .expect("Failed to normalize empty usernames");
+            }
+        }
+        v = 6;
+    }
+
     sqlx::query(update_db_version_sql(database_kind))
         .bind(v)
         .execute(pool)
@@ -411,10 +460,13 @@ async fn migrate_sqlite_last_time_to_unix(pool: &DbPool) -> Result<(), sqlx::Err
         .execute(&mut *tx)
         .await?;
 
+    // `username` stays nullable here: legacy databases predate the NOT NULL constraint and may
+    // already hold NULL usernames, which this rebuild would otherwise reject. The v5 -> v6
+    // migration relaxes the constraint everywhere anyway.
     sqlx::query(
         "CREATE TABLE users (
             user_id INTEGER NOT NULL UNIQUE,
-            username TEXT NOT NULL,
+            username TEXT,
             count INTEGER NOT NULL DEFAULT 0,
             last_time BIGINT,
             is_admin BOOLEAN NOT NULL DEFAULT 0,
@@ -443,6 +495,42 @@ async fn migrate_sqlite_last_time_to_unix(pool: &DbPool) -> Result<(), sqlx::Err
     .await?;
 
     sqlx::query("DROP TABLE users_v2").execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn migrate_sqlite_username_nullable(pool: &DbPool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("ALTER TABLE users RENAME TO users_v5")
+        .execute(&mut *tx)
+        .await?;
+
+    sqlx::query(users_table_ddl(DatabaseKind::Sqlite))
+        .execute(&mut *tx)
+        .await?;
+
+    // NULLIF turns the empty-string placeholder written before this migration into a real NULL,
+    // COALESCE covers last_time rows still nullable from the v2 -> v3 rebuild.
+    sqlx::query(
+        "INSERT INTO users (user_id, username, first_name, last_name, count, last_time, is_admin, is_banned, probably_guarantee)
+         SELECT
+             user_id,
+             NULLIF(username, ''),
+             first_name,
+             last_name,
+             count,
+             COALESCE(last_time, 0),
+             is_admin,
+             is_banned,
+             probably_guarantee
+         FROM users_v5",
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query("DROP TABLE users_v5").execute(&mut *tx).await?;
 
     tx.commit().await?;
     Ok(())
@@ -615,7 +703,7 @@ where
     );
     if let Err(e) = sqlx::query(upsert_user_sql(database_kind))
         .bind(user.user_id)
-        .bind(user.username)
+        .bind(normalize_username(user.username))
         .bind(user.first_name)
         .bind(user.last_name)
         .bind(new_count)
@@ -747,7 +835,7 @@ pub async fn find_user_by_id_or_username(
     Option<(
         i64,
         Option<i64>,
-        String,
+        Option<String>,
         Option<String>,
         Option<String>,
         i64,
@@ -775,7 +863,7 @@ pub async fn find_user_by_id_or_username(
         if let Some(row) = sqlx::query(sql_by_id).bind(id).fetch_optional(pool).await? {
             let count: i64 = row.try_get("count")?;
             let last_time: Option<i64> = row.try_get("last_time").ok();
-            let username: String = row.try_get("username")?;
+            let username: Option<String> = row.try_get("username").unwrap_or(None);
             let first_name: Option<String> = row.try_get("first_name").ok();
             let last_name: Option<String> = row.try_get("last_name").ok();
             let user_id: i64 = row.try_get("user_id")?;
@@ -787,6 +875,10 @@ pub async fn find_user_by_id_or_username(
     }
 
     let uname = key.trim_start_matches('@');
+    // An empty key would otherwise match legacy rows that still hold an empty username.
+    if uname.is_empty() {
+        return Ok(None);
+    }
     if let Some(row) = sqlx::query(sql_by_name)
         .bind(uname)
         .fetch_optional(pool)
@@ -794,7 +886,7 @@ pub async fn find_user_by_id_or_username(
     {
         let count: i64 = row.try_get("count")?;
         let last_time: Option<i64> = row.try_get("last_time").ok();
-        let username: String = row.try_get("username")?;
+        let username: Option<String> = row.try_get("username").unwrap_or(None);
         let first_name: Option<String> = row.try_get("first_name").ok();
         let last_name: Option<String> = row.try_get("last_name").ok();
         let user_id: i64 = row.try_get("user_id")?;
@@ -829,12 +921,12 @@ pub async fn sync_user_info(
     .await?;
 
     if let Some(row) = row {
-        let stored_username: String = row.try_get("username").unwrap_or_default();
+        let stored_username: Option<String> = row.try_get("username").unwrap_or(None);
         let stored_first_name: Option<String> = row.try_get("first_name").ok();
         let stored_last_name: Option<String> = row.try_get("last_name").ok();
 
-        let new_username = username.unwrap_or("");
-        let username_changed = stored_username != new_username;
+        let new_username = normalize_username(username);
+        let username_changed = normalize_username(stored_username.as_deref()) != new_username;
         let first_name_changed = stored_first_name.as_deref() != first_name;
         let last_name_changed = stored_last_name.as_deref() != last_name;
 
@@ -1025,4 +1117,277 @@ pub async fn set_probably_guarantee(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::any::install_default_drivers;
+    use std::sync::Once;
+
+    static DRIVERS: Once = Once::new();
+
+    /// Create an empty SQLite file and connect to it, mirroring what main.rs does at startup
+    /// (sqlx::Any does not auto-create missing SQLite files).
+    async fn fresh_sqlite(name: &str) -> (DbPool, std::path::PathBuf) {
+        DRIVERS.call_once(install_default_drivers);
+        let path = std::env::temp_dir().join(format!("zw-rs-migration-test-{}.db", name));
+        let _ = std::fs::remove_file(&path);
+        std::fs::File::create(&path).expect("failed to create test database file");
+        let pool = DbPool::connect(&format!("sqlite:{}", path.display()))
+            .await
+            .expect("failed to connect to test database");
+        (pool, path)
+    }
+
+    async fn db_version(pool: &DbPool) -> i32 {
+        sqlx::query_scalar("SELECT version FROM db_version")
+            .fetch_one(pool)
+            .await
+            .expect("failed to read db_version")
+    }
+
+    async fn username_of(pool: &DbPool, user_id: i64) -> Option<String> {
+        sqlx::query_scalar("SELECT username FROM users WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .expect("failed to read username")
+    }
+
+    /// A legacy database matching the schema documented in README.md, where `username`
+    /// was already nullable and `last_time` was a DATETIME string.
+    #[tokio::test]
+    async fn legacy_v0_with_null_username_migrates_to_v6() {
+        let (pool, path) = fresh_sqlite("legacy-v0").await;
+        sqlx::query(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER UNIQUE,
+                username TEXT,
+                count INTEGER DEFAULT 0,
+                last_time DATETIME
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO users (user_id, username, count, last_time) VALUES
+                (1, 'alice', 10, '2023-11-14 22:13:20'),
+                (2, NULL, 5, NULL),
+                (3, '', 7, '2023-11-14 22:13:21')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        init_database(&pool, DatabaseKind::Sqlite).await;
+
+        assert_eq!(db_version(&pool).await, CURRENT_DB_VERSION);
+        assert_eq!(username_of(&pool, 1).await.as_deref(), Some("alice"));
+        assert_eq!(username_of(&pool, 2).await, None);
+        assert_eq!(username_of(&pool, 3).await, None, "'' must become NULL");
+
+        let (count, last_time) = get_user_count_and_last_time(&pool, DatabaseKind::Sqlite, 1)
+            .await
+            .unwrap();
+        assert_eq!(count, 10);
+        assert_eq!(last_time, Some(1700000000));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A database created by v2.2.2 as a fresh install: v5 column order, username NOT NULL.
+    #[tokio::test]
+    async fn fresh_v5_migrates_to_v6_and_accepts_null_username() {
+        let (pool, path) = fresh_sqlite("fresh-v5").await;
+        sqlx::query(
+            "CREATE TABLE users (
+                user_id INTEGER NOT NULL UNIQUE,
+                username TEXT NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
+                count INTEGER NOT NULL DEFAULT 0,
+                last_time BIGINT NOT NULL DEFAULT 0,
+                is_admin BOOLEAN NOT NULL DEFAULT 0,
+                is_banned INTEGER NOT NULL DEFAULT 0,
+                probably_guarantee INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("CREATE TABLE db_version (version INTEGER NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO db_version (version) VALUES (5)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO users (user_id, username, first_name, last_name, count, last_time, is_admin, is_banned, probably_guarantee)
+             VALUES (1, 'alice', 'Alice', 'A', 10, 1700000000, 1, 0, 5),
+                    (2, '', 'Bob', NULL, 3, 1700000001, 0, 2, 42)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        init_database(&pool, DatabaseKind::Sqlite).await;
+
+        assert_eq!(db_version(&pool).await, CURRENT_DB_VERSION);
+        assert_eq!(username_of(&pool, 2).await, None);
+        // every other column must survive the table rebuild
+        assert!(is_admin(&pool, DatabaseKind::Sqlite, 1).await.unwrap());
+        assert_eq!(ban_status(&pool, DatabaseKind::Sqlite, 2).await.unwrap(), 2);
+        assert_eq!(
+            get_probably_guarantee(&pool, DatabaseKind::Sqlite, 2)
+                .await
+                .unwrap(),
+            42
+        );
+
+        // a brand new user with no Telegram username must now be storable
+        upsert_user(
+            &pool,
+            DatabaseKind::Sqlite,
+            &UserIdent {
+                user_id: 3,
+                username: None,
+                first_name: Some("NoName"),
+                last_name: None,
+            },
+            1,
+            1700000002,
+        )
+        .await
+        .expect("inserting a user without a username must succeed");
+
+        let found = find_user_by_id_or_username(&pool, DatabaseKind::Sqlite, "3")
+            .await
+            .expect("reading a user without a username must not error")
+            .expect("user 3 should exist");
+        assert_eq!(found.2, None);
+        assert_eq!(
+            get_user_display_name(
+                found.3.as_deref(),
+                found.4.as_deref(),
+                found.2.as_deref(),
+                3
+            ),
+            "NoName"
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// init_database runs on every startup; a second run must be a no-op.
+    #[tokio::test]
+    async fn migration_is_idempotent() {
+        let (pool, path) = fresh_sqlite("idempotent").await;
+        init_database(&pool, DatabaseKind::Sqlite).await;
+        upsert_user(
+            &pool,
+            DatabaseKind::Sqlite,
+            &UserIdent {
+                user_id: 1,
+                username: None,
+                first_name: Some("Alice"),
+                last_name: None,
+            },
+            9,
+            1700000000,
+        )
+        .await
+        .unwrap();
+
+        init_database(&pool, DatabaseKind::Sqlite).await;
+        init_database(&pool, DatabaseKind::Sqlite).await;
+
+        assert_eq!(db_version(&pool).await, CURRENT_DB_VERSION);
+        assert_eq!(username_of(&pool, 1).await, None);
+        assert_eq!(
+            get_user_count_and_last_time(&pool, DatabaseKind::Sqlite, 1)
+                .await
+                .unwrap(),
+            (9, Some(1700000000))
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// sync_user_info must not resurrect the empty-string placeholder.
+    #[tokio::test]
+    async fn sync_user_info_stores_null_for_missing_username() {
+        let (pool, path) = fresh_sqlite("sync-null").await;
+        init_database(&pool, DatabaseKind::Sqlite).await;
+
+        sync_user_info(&pool, DatabaseKind::Sqlite, 1, None, Some("Alice"), None)
+            .await
+            .unwrap();
+        assert_eq!(username_of(&pool, 1).await, None);
+
+        // gaining a username, then losing it again
+        sync_user_info(
+            &pool,
+            DatabaseKind::Sqlite,
+            1,
+            Some("alice"),
+            Some("Alice"),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(username_of(&pool, 1).await.as_deref(), Some("alice"));
+
+        sync_user_info(&pool, DatabaseKind::Sqlite, 1, None, Some("Alice"), None)
+            .await
+            .unwrap();
+        assert_eq!(username_of(&pool, 1).await, None);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The rebuild commits in its own transaction, but db_version is bumped afterwards.
+    /// A crash in between must leave the v5 -> v6 step safely re-runnable on the next start.
+    #[tokio::test]
+    async fn interrupted_migration_reruns_cleanly() {
+        let (pool, path) = fresh_sqlite("interrupted").await;
+        init_database(&pool, DatabaseKind::Sqlite).await;
+        upsert_user(
+            &pool,
+            DatabaseKind::Sqlite,
+            &UserIdent {
+                user_id: 1,
+                username: Some("alice"),
+                first_name: Some("Alice"),
+                last_name: None,
+            },
+            9,
+            1700000000,
+        )
+        .await
+        .unwrap();
+
+        // simulate: table was already rebuilt, then the process died before the version bump
+        sqlx::query("UPDATE db_version SET version = 5")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        init_database(&pool, DatabaseKind::Sqlite).await;
+
+        assert_eq!(db_version(&pool).await, CURRENT_DB_VERSION);
+        assert_eq!(username_of(&pool, 1).await.as_deref(), Some("alice"));
+        assert_eq!(
+            get_user_count_and_last_time(&pool, DatabaseKind::Sqlite, 1)
+                .await
+                .unwrap(),
+            (9, Some(1700000000))
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
 }

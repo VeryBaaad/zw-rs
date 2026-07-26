@@ -94,7 +94,7 @@ pub async fn handle_zw(
         target_user_id,
         target_first_name.as_deref(),
         target_last_name.as_deref(),
-        Some(&target_username),
+        target_username.as_deref(),
     );
 
     let (initiator_count, initiator_last_time_opt) =
@@ -214,7 +214,7 @@ pub async fn handle_zw(
         database_kind,
         &UserIdent {
             user_id: target_user_id,
-            username: Some(&target_username),
+            username: target_username.as_deref(),
             first_name: target_first_name.as_deref(),
             last_name: target_last_name.as_deref(),
         },
